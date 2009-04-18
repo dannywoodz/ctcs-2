@@ -1,0 +1,1873 @@
+#!/usr/bin/perl -wT
+###############################################################################
+#
+=pod
+
+=head1 NAME
+
+ctcs2
+
+=head1 SYNOPSIS
+
+ctcs2 [--download=1000] [--upload=50] [--port=8080] [--no-log-times] [--help]
+
+=head1 DESCRIPTION
+
+A replacement for the CTorrent Control Center
+(http://www.rahul.net/dholmes/ctorrent/ctcs.html) that aims for clean code and
+simple extensibility.
+
+Many thanks to Dennis Holmes for the original CTCS code, which was used
+extensively during development as a protocol reference.
+
+=head1 COMMAND LINE OPTIONS
+
+=over
+
+=item --download
+
+Sets the download limit used by the server, in KB/s.  Can be changed later
+from the Web UI.  Defaults to 1000.
+
+=item --upload
+
+Sets the upload limit used by the server, in KB/s.  Can be changed later
+from the Web UI.  Defaults to 50.
+
+=item --port
+
+Sets the port to listen on for ctorrent/Web connections.  Defaults to 8080
+
+=item --no-log-times
+
+Suppresses the printing of timestamps on log messages.  This is useful when
+using CTCS2 with an external logging mechanism like daemontools' multilog, where
+timestamps are automatically prepended to log lines.  Defaults to off (log
+messages are timestamped)
+
+=back
+
+=head1 AUTHOR
+
+Danny Woods (dannywoodz@yahoo.co.uk)
+
+=head1 DATE
+
+18-Apr-2009
+
+=head1 COPYRIGHT
+
+Copyright (c) 2009 Danny Woods
+
+=head1 LICENCE
+
+BSD
+
+=cut
+#
+###############################################################################
+
+use IO::Socket;
+use IO::Select;
+use IO::String;
+use Socket 'TCP_NODELAY';
+use Fcntl 'O_NONBLOCK';
+use Errno 'EAGAIN';
+use CGI qw(:standard);
+use Getopt::Long;
+use POSIX qw(strftime);
+use Data::Dumper;
+use strict;
+use warnings;
+use constant LOG_TEMP    => 0;
+use constant LOG_DEBUG   => 1;
+use constant LOG_INFO    => 2;
+use constant LOG_WARNING => 3;
+use constant LOG_ERROR   => 4;
+
+$SIG{INT}  = \&cleanup;
+$SIG{TERM} = \&cleanup;
+$|         = 1; # Autoflush STDOUT
+
+my $port                    = 8080;
+my $download_limit          = 1000;
+my $upload_limit            = 50;
+my $suppress_log_timestamps = 0;
+my $help                    = undef;
+
+###############################################################################
+# The core data structures used by the server.
+# %clients is a hash of hashes that contains information about clients, whether
+# they are web browsers or ctorrent instances.  The keys are the socket
+# instances themselves.  The values are sub-hashes.
+#
+# A typical clients hash might look like this:
+#
+# %clients{$socket}->{torrent}->{id}
+#                             ->{name}
+#                             ->{upload_rate}
+#                             ->{download_rate}
+#                             ->{size}
+#                             ->{piece_size}
+#                             ->{active_seeders}
+#                             ->{total_seeders}
+#                             ->{active_leechers}
+#                             ->{total_leechers}
+#                             ->{total_connections}
+#                             ->{downloaded_chunks}
+#                             ->{total_chunks}
+#                             ->{available_chunks}
+#                             ->{downloaded}
+#                             ->{uploaded}
+#                             ->{download_limit}
+#                             ->{upload_limit}
+#                             ->{cache_used}
+#                             ->{last_status_update}
+#                             ->{files}->[$n]->{name}
+#                                            ->{size}
+#                             ->{peers}->[$n]->{id}
+#                                            ->{address}
+#                                            ->{remote_flags}
+#                                            ->{local_flags}
+#                                            ->{download_rate}
+#                                            ->{upload_rate}
+#                                            ->{downloaded}
+#                                            ->{uploaded}
+#                                            ->{pieces}
+#                             ->{config}->{$field}->{value}
+#                                                 ->{type}
+#                                                 ->{range}
+#                                                 ->{short_desc}
+#                                                 ->{long_desc}
+#
+#                  ->{address}
+#                  ->{messages}->[ writer-function-1 ... writer-function-n ]
+#
+# Web clients don't have the 'torrent' subhash: that is only available for
+# ctorrent clients.
+#
+# %ctcs contains information about the server: global upload limit, download
+# limit, uptime, etc.  This information is relevant to the server, and NOT
+# any individual torrent.
+#
+# Occasionally, it's useful to find a client socket using the torrent name:
+# it's very tempting at this point to add another hash that has this mapping,
+# but really, the cost of searching is minimal, and not worth the additional
+# headaches of making sure that everything's correctly cleaned up.  The good
+# thing about this structure is that when a socket is closed, it's just
+# a matter of deleting it from the %clients hash to get rid of all associated
+# information.
+###############################################################################
+
+my %clients;
+my %ctcs;
+
+###############################################################################
+# Command-line options
+###############################################################################
+
+GetOptions('port=i'       => \$port,
+           'download=i'   => \$download_limit,
+           'upload=i'     => \$upload_limit,
+	   'no-log-times' => \$suppress_log_timestamps,
+	   'help'         => \$help);
+
+###############################################################################
+# Usage
+###############################################################################
+
+if ($help)
+{
+  eval "use Pod::Text;";
+  pod2text($0);
+  exit(0);
+}
+
+###############################################################################
+# The server socket, and activity handles to be used later in a select call.
+###############################################################################
+
+my $server = IO::Socket::INET->new(LocalPort => $port,
+				   ReuseAddr => 1,
+				   Type      => SOCK_STREAM,
+				   Blocking  => 0,
+				   Proto     => 'tcp',
+				   Listen    => SOMAXCONN) || die $!;
+
+my $readers  = IO::Select->new();
+my $writers  = IO::Select->new();
+my $errors   = IO::Select->new();
+
+$readers->add($server);
+
+###############################################################################
+# Setup defaults for the server
+###############################################################################
+
+$ctcs{download_limit}       = $download_limit * 1024;
+$ctcs{upload_limit}         = $upload_limit * 1024;
+$ctcs{accepted_connections} = 0;
+$ctcs{closed_connections}   = 0;
+$ctcs{port}                 = $port;
+$ctcs{log_timestamps}       = !$suppress_log_timestamps;
+$ctcs{log_level}            = LOG_INFO;
+
+ctcs_log(LOG_INFO, "CTCS Server started on port $port");
+
+###############################################################################
+# Main loop
+###############################################################################
+
+for(my $last_update = time(); defined($server); )
+{
+  my ($readable, $writable, $errors) =
+    IO::Select::select($readers, $writers, $errors, 1);
+  handle_write($_) for @$writable;
+  handle_read($_)  for @$readable;
+  handle_error($_) for @$errors;
+
+  if(time() != $last_update)
+  {
+    foreach my $client(torrent_clients())
+    {
+      my $torrent = torrent_handled_by($client);
+      unless(torrent_is_paused($torrent))
+      {
+	torrent_update_detail($client);
+	torrent_update_status($client);
+	torrent_update_peers($client);
+	torrent_update_config($client);
+      }
+      ctcs_update_bandwidth_allocation();
+    }
+    $last_update = time();
+  }
+}
+
+cleanup();
+exit(0);
+
+###############################################################################
+# Subroutines
+###############################################################################
+
+sub cleanup
+{
+  if ($server)
+  {
+    print "Cleaning up\n";
+    $readers->remove($server);
+    $server->shutdown(2);
+    $server->close();
+    undef $server;
+  }
+}
+
+###############################################################################
+# A read event is triggered by two things: when it appears on the server
+# socket, it means that a new client is asking for permission to connect.
+# Being triggered by any other socket means that it's a client socket sending
+# a message
+###############################################################################
+
+sub handle_read
+{
+  my $socket = shift;
+  if ($socket == $server) # New client connection
+  {
+    register_new_client($socket->accept());
+    $ctcs{accepted_connections}++;
+  }
+  else # Incoming data on a client handle
+  {
+    handle_request($socket);
+  }
+}
+
+###############################################################################
+# A new client gets a slot in the %messages hash, with an empty queue.  They
+# are then added to the readers list so that a future select will reap their
+# request.
+###############################################################################
+
+sub register_new_client
+{
+  my $client = shift;
+  $client->sockopt(O_NONBLOCK | TCP_NODELAY, 1);
+  ctcs_log(LOG_INFO,
+	   "connection from %s on port %d",
+	   address_of($client),
+	   $client->peerport());
+  $clients{$client} = {};
+  $clients{$client}->{messages} = [];
+  $readers->add($client);
+}
+
+###############################################################################
+# Cleans up the resources associated with a given socket.
+###############################################################################
+
+sub deregister_client
+{
+  my $client   = shift;
+  my $hostname = address_of($client);
+  if (scalar @{$clients{$client}->{messages}})
+  {
+    ctcs_log(LOG_WARNING, "CLIENT BEING DELETED WITH A NON-EMPTY MESSAGE QUEUE");
+    my $string = IO::String->new();
+    $_->($string) for @{$clients{$client}->{messages}};
+    print ${$string->string_ref()}, "\n";
+  }
+  delete $clients{$client};
+  ctcs_log(LOG_INFO,
+	   "connection closed%s",
+	   (defined($hostname)) ? " from $hostname" : "");
+  $readers->remove($client) while $readers->exists($client);
+  $writers->remove($client) while $writers->exists($client);
+  $client->shutdown(2);
+  $client->close();
+  $ctcs{closed_connections}++;
+}
+
+###############################################################################
+# A new client request can be triggered by one of two things: the client
+# closing or actually presenting data on the wire to be read.  In the latter
+# case, the client is added as a writer for a future select, and a *function*
+# that will supply what to write is added to its message queue.
+# If the event was triggered by client closure, nothing will be read from the
+# underlying socket, so the clients can be removed from the readers list,
+# its message queue destroyed and then be explicitly closed.
+###############################################################################
+
+sub handle_request
+{
+  my $client = shift;
+  my $reader = reader_function_for($client);
+  my $message = $reader->($client);
+
+  if ($message)
+  {
+    ctcs_log(LOG_DEBUG, "Message from %s: '%s'", address_of($client), $message);
+    my $function = function_to_handle_request($message, $client);
+    if ($function)
+    {
+      send_message_function($function, $client);
+    }
+    else
+    {
+      ctcs_log(LOG_WARNING, "No handler for '$message'");
+      send_message_function(\&null_writer_function, $client);
+    }
+  }
+  else
+  {
+    if ($! == EAGAIN)
+    {
+      ctcs_log(LOG_DEBUG, "EAGAIN is set: will handle request later");
+      $! = 0;
+    }
+    else
+    {
+      my $torrent = $clients{$client}->{torrent};
+      deregister_client($client);
+      autobalance_bandwidth() if $torrent;
+    }
+  }
+}
+
+###############################################################################
+# name:        reader_function_for
+# description: Returns a function that, when called against a given socket,
+#              will return that socket's request. If the request is a simple
+#              HTTP GET or ctorrent CTBW, etc., the return value is a single
+#              line.  POSTs are returned in their entirety.
+#              In any event, if the request cannot be read fully, this function
+#              returns undef.  If it's simply an exhausted buffer, $! is set to
+#              EAGAIN.  It can be called repeatedly against the same socket
+#              until it either returns the message, or undef with $! != EAGAIN
+# returns:     a function that should be invoked with an IO::Handle object
+#              (most likely a socket)
+###############################################################################
+
+sub reader_function_for
+{
+  my ($socket) = @_;
+  my $function = $clients{$socket}->{reader};
+  if (!$function)
+  {
+    my @header;
+    my $header_read;
+    my $content_length;
+    my $body;
+
+    my $initialise = sub {
+      ctcs_log(LOG_DEBUG, "Initialising reader function");
+      @header = ();
+      $header_read    = 0;
+      $content_length = 0;
+      $body = '';
+    };
+
+    $initialise->();
+
+    $function = $clients{$socket}->{reader} = sub {
+      my $client = $_[0];
+      my ($line, $result);
+      while(!$header_read && defined($line = ctcs_getline($client)))
+      {
+        if (scalar @header == 0)
+        {
+          return $line unless $line =~ /^(?:POST|GET)/;
+        }
+	$content_length = $1 if $line =~ /^Content-Length: (\d+)/;
+	ctcs_log(LOG_DEBUG, "Header line: '%s'", $line);
+	push(@header, $line);
+	$header_read = 1 if $line eq '';
+      }
+      return undef unless defined($line);
+
+      ctcs_log(LOG_DEBUG, "Content-Length: %s", $content_length);
+      ctcs_log(LOG_DEBUG, "BEFORE: Length of body is %d", length($body));
+
+      while($content_length > 0 &&
+            defined($result = sysread($client, $body, length($body),
+				      $content_length - length($body))))
+      {
+      }
+
+      ctcs_log(LOG_DEBUG, "AFTER: Length of body is %d", length($body));
+      ctcs_log(LOG_DEBUG, "Body is '%s'", $body);
+
+      if (!defined($result) && length($body) < $content_length)
+      {
+        if ($! == EAGAIN)
+        {
+          ctcs_log(LOG_DEBUG, "Partial read; returning to queue");
+          return undef;
+        }
+        else
+        {
+          ctcs_log(LOG_DEBUG, "Read result: %s; EAGAIN is%s set",
+                   (defined($result)) ? $result : "undefined",
+                   $! == EAGAIN ? "" : " NOT");
+          return undef;
+        }
+      }
+
+      return undef unless length($body) == $content_length;
+
+      ctcs_log(LOG_DEBUG, "Body: %s", $body);
+
+      push(@header, $body) if $body;
+      my $response = join("\n", @header);
+      $initialise->();
+      return $response;
+    }
+  }
+  return $function;
+}
+
+###############################################################################
+# name:        writer_function
+# description: returns a function that, when given an IO handle, will write
+#              the return value of the function given to writer_function onto
+#              it (pause and think about that for a second: I definitely needed
+#              to).  The function returned will return a false value if it
+#              hasn't written the entire message, or a true value if it has.
+# params:      a reference to a function whose return value should be fed into
+#              the function returned by this function.
+# returns:     a function that takes an IO handle
+###############################################################################
+
+sub writer_function
+{
+  my $handler = shift;
+  my $close_after_write = shift;
+  my $message = $handler->();
+  my $message_length = length($message);
+  my $message_offset = 0;
+  return sub {
+    return 1 if $message_offset >= $message_length;
+    my $client  = shift;
+
+    ctcs_log(LOG_DEBUG, "Writing %d bytes of length %d, starting at %d", $message_length - $message_offset, $message_length, $message_offset);
+
+    my $written = syswrite($client,
+			   $message,
+			   $message_length - $message_offset,
+			   $message_offset);
+    if (!defined($written))
+    {
+      ctcs_log(LOG_WARNING, "Failed to write message '%s', starting at index %d",
+               $message,
+	       $message_length - $message_offset);
+      return 1; # The message is effectively finished if it has errored
+    }
+
+    ctcs_log(LOG_DEBUG, "Wrote %d bytes of a %d byte message", $written, $message_length);
+
+    $message_offset += $written;
+    my $finished = ($message_offset == $message_length);
+
+    ctcs_log(LOG_DEBUG, "Wrote %d bytes, leaving %d remaining. Message is%s finished\n", $written, $message_length - $message_offset, $finished ? "" : " NOT");
+
+    shift(@{$clients{$client}->{messages}}) && deregister_client($client) if ($finished && $close_after_write);
+    return $finished;
+  }
+}
+
+###############################################################################
+# Inevitably, some requests do not require responses: this writer function
+# implementation sends no content back.
+###############################################################################
+
+sub null_writer_function
+{
+  return writer_function(sub{''});
+}
+
+###############################################################################
+# Writing is simple: for a given socket, it has a queue of functions in the
+# 'messages' subhash.  Each of these functions will return true if they finish
+# sending, and false otherwise.  Each function should be a writer_function that
+# wraps a content generating function: the writer function keeps track of how
+# much of a given message that it has sent, so it needn't be tracked here.
+###############################################################################
+
+sub handle_write
+{
+  my $client = shift;
+  my $messages = $clients{$client}->{messages};
+
+  while($messages && @$messages)
+  {
+    my $function = $messages->[0];
+    last if !$function->($client);
+    shift(@$messages);
+  }
+
+  $writers->remove($client) unless ($messages && @$messages);
+}
+
+###############################################################################
+# This is the big decision maker: given a message, it needs to return a
+# writer_function that wraps some content generating function.  The content
+# generating function needs to return a string.
+###############################################################################
+
+sub function_to_handle_request
+{
+  my ($message, $client) = @_;
+
+  $_ = $message;
+
+  if(/^CTBW\s+(\d+),\s*(\d+)\s+(\d+),\s*(\d+)/)
+  {
+    record_bandwidth($client, $1, $2);
+  }
+  elsif(/^CTPEER\s+(.*)/)
+  {
+    torrent_add_peer(torrent_handled_by($client), $1);
+  }
+  elsif(/^CTCONFIG\s+(.*)/)
+  {
+    torrent_store_config(torrent_handled_by($client), $1);
+  }
+  elsif(/^CTFILE\s+(.*)/)
+  {
+    ctcs_log(LOG_DEBUG, "Got a file: %s", $1);
+    torrent_populate_file_info(torrent_handled_by($client), $1);
+  }
+  elsif (/^CTPEERSTART/)
+  {
+    $clients{$client}->{torrent}->{incoming_peers} = [];
+  }
+  elsif (/^CTPEERSDONE/)
+  {
+    ctcs_log(LOG_INFO, "Received %d peers for '%s'",
+	     peer_count_for($client),
+	     torrent_handled_by($client)->{name});
+    $clients{$client}->{torrent}->{peers} = $clients{$client}->{torrent}->{incoming_peers};
+    $clients{$client}->{torrent}->{incoming_peers} = [];
+    $clients{$client}->{torrent}->{last_peers_update} = time();
+  }
+  elsif(/^CTSTATUS\s+(.*)/)
+  {
+    my $torrent_info = torrent_handled_by($client);
+    torrent_set_status($torrent_info, $1);
+    return exists($torrent_info->{size}) ?
+    null_writer_function() :
+    writer_function(\&ctcs_request_detail_command);
+  }
+  elsif(/^CTDETAIL\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/)
+  {
+    my $torrent_info = torrent_handled_by($client);
+    $torrent_info->{size}       = $1;
+    $torrent_info->{piece_size} = $2;
+    $torrent_info->{time_now}   = $3;
+    $torrent_info->{time_seed}  = $4;
+  }
+  elsif (/^CTORRENT\s+([^\s]+)(?:\s+(\d+)\s+(\d+)\s+(.*))?/)
+  {
+    handle_register_torrent($client, $1, $2, $3, $4);
+    autobalance_bandwidth();
+    return writer_function( sub { ctcs_protocol() . "\r\n" });
+  }
+  elsif (/^GET\s+([^\s]+)/)
+  {
+    return writer_function(sub { handle_send_page($1, $client) }, 1);
+  }
+  elsif (/^POST\s+([^\s]+)/)
+  {
+    return writer_function(sub { handle_form_submission($1, $client, $_)}, 1 );
+  }
+  elsif (/^DUMP\s*$/)
+  {
+    return writer_function(\&handle_dump);
+  }
+  elsif(/^PROTOCOL\s+0*(\d+)/)
+  {
+    $ctcs{protocol} = $1;
+  }
+  return null_writer_function();
+}
+
+###############################################################################
+# This is a simple convenience utility.  Given a block of code, any 'print'
+# or 'write' statements *not* directed at a specific filehandle will instead
+# be collected in a string that is returned when the function completes.
+###############################################################################
+
+sub with_output_to_string(&)
+{
+  my $function = shift;
+  my $string = IO::String->new();
+  my $oldfd = select $string;
+  eval { $function->() };
+  select $oldfd;
+  die $@ if $@;
+  return ${$string->string_ref()};
+}
+
+###############################################################################
+# Given a location, this function should return a string that represents the
+# content of that location
+###############################################################################
+
+sub handle_send_page
+{
+  my ($location, $client) = @_;
+  my $response_code;
+  my $page;
+  my $page_content = page_content($location);
+
+  if ($page_content)
+  {
+    $page = with_output_to_string {
+      print start_html(-title => 'CTCS 2',
+                       -head  => style({type => 'text/css'},
+                                       stylesheet())),
+            $page_content,
+            end_html();
+    };
+    $response_code = '200 OK';
+  }
+  else
+  {
+    $page = with_output_to_string {
+      print start_html({title => 'CTCS 2 - Page Not Found'}),
+            error_page($page),
+            end_html();
+    };
+    $response_code = '404 Not Found';
+  }
+
+  return sprintf("HTTP/1.1 %s\r\n%s%s", $response_code, header({Connection => 'close', content_length => length($page)}), $page);
+}
+
+sub handle_form_submission
+{
+  my ($target, $client, $request) = @_;
+  my $query = CGI->new(IO::String->new($request));
+
+  ctcs_log(LOG_DEBUG, $request);
+
+  if ($target eq "/")
+  {
+    my $upload_limit              =  $query->param('ulimit');
+    my $download_limit            =  $query->param('dlimit');
+    $ctcs{download_limit}         =  (int($download_limit) * 1024) if defined $download_limit;
+    $ctcs{upload_limit}           =  (int($upload_limit) * 1024) if defined $upload_limit;
+    autobalance_bandwidth();
+    return with_output_to_string {
+      print "HTTP/1.1 302 Found\r\n";
+      print $query->redirect(-uri => '/');
+    }
+  }
+  elsif ($target eq "/status-action")
+  {
+    my $action = $query->param('action');
+    my $id     = CGI::unescape($query->param('torrent-id'));
+
+    $action =~ s/(\S)\s*$/$1/;
+    $id =~ s/(\S)\s*$/$1/;
+
+    my $torrent = get_torrent_by_id($id);
+
+    torrent_pause($torrent)  if $action eq 'Pause';
+    torrent_resume($torrent) if $action eq 'Resume';
+    torrent_quit($torrent)   if $action eq 'Quit';
+    torrent_update($torrent) if $action eq 'Update';
+
+    return with_output_to_string {
+      print "HTTP/1.1 302 Found\r\n";
+      print $query->redirect(-uri => '/');
+    }
+  }
+  elsif ($target eq '/set-config')
+  {
+    my $params = $query->Vars;
+    my $id = $params->{'torrent-id'};
+    $id =~ s/(\S)\s*$/$1/ if $id;
+    my $page = $id ? "/torrent/$id" : '/';
+    my $torrent = get_torrent_by_id(CGI::unescape($id));
+    my $config = $torrent->{config};
+
+    map {
+      $params->{$_} =~ s/(\S)\s*$/$1/;
+      $params->{$_} = CGI::unescape($params->{$_});
+      if (exists($config->{$_}) &&
+	  $config->{$_}->{value} ne $params->{$_})
+      {
+	#######################################################################
+	# When changing CTCS server, *don't* go back to the info for this page:
+	# it belongs to another server
+	#######################################################################
+	$page = "/" if $_ eq 'ctcs_server';
+	torrent_set_config($torrent, $_, $params->{$_});
+      }
+    } keys %$params;
+
+    return with_output_to_string {
+      print "HTTP/1.1 302 Found\r\n";
+      print $query->redirect(-uri => $page);
+    }
+  }
+  elsif ($target eq '/set-advanced-limits')
+  {
+    my $params = $query->Vars;
+    map {
+      my ($operation, $id) = split(/-/, $_, 2);
+
+      if (defined($operation) && defined($id))
+      {
+	my $torrent = get_torrent_by_id(CGI::unescape($id));
+	if ($operation eq 'upload' || $operation eq 'download')
+	{
+	  unless(exists($params->{"automanage-$id"}))
+	  {
+	    torrent_set_manual_bandwidth_limit($torrent,
+					       $operation,
+					       $params->{$_} * 1024);
+	  }
+	}
+	elsif($operation eq 'automanage')
+	{
+	  ctcs_log(LOG_INFO, "Automatically managing bandwidth allocation for '%s'",
+		   $torrent->{name});
+	  delete $torrent->{manual_upload_limit};
+	  delete $torrent->{manual_download_limit};
+	}
+      }
+    } keys %$params;
+    return with_output_to_string {
+      print "HTTP/1.1 302 Found\r\n";
+      print $query->redirect(-uri => '/advanced-limits');
+    }
+  }
+  return error_page($target);
+}
+
+sub page_content
+{
+  my $page = shift;
+  return index_page() if $page eq "/";
+  return torrent_info_page($1) if $page =~ /^\/?torrent\/(.+)$/;
+  return advanced_limits_page() if $page eq '/advanced-limits';
+  return debug_page() if $page eq "/debug";
+  return undef;
+}
+
+###############################################################################
+# The front page
+###############################################################################
+
+sub index_page
+{
+  return with_output_to_string {
+    print h2({-id => 'title'}, 'CTorrent Control Server' . span({style=>'font-size: 250%; font-style: italic; position: relative; z-index: -1; top: 0.2em; right: 0.75em; color: #bfb;'}, '2'));
+    my ($download_bandwidth, $upload_bandwidth) = total_used_bandwidth();
+    my $current_download_field = human_readable($download_bandwidth);
+    my $current_upload_field = human_readable($upload_bandwidth);
+    my $download_field = textfield({name=> 'dlimit',
+				    value => ($ctcs{download_limit} / 1024),
+                                    maxlength => 6,
+                                    size => 6});
+    my $upload_field = textfield({name=> 'ulimit',
+				  value=> ($ctcs{upload_limit} / 1024),
+                                  maxlength => 6,
+                                  size => 6});
+    my $submit_button = submit({name=>'submit-bandwidth-changes',
+				value=>'Apply Changes'});
+    print<<END_TABLE;
+<form action="/" method="post" enctype="application/x-form-www-urlencoded">
+<div id="global-bandwidth-limits">
+  <table>
+    <tr><th>Current Download Bandwidth:</th><td class="numeric" id="download-bandwidth">$current_download_field/s</td></tr>
+    <tr><th>Current Upload Bandwidth:</th><td class="numeric" id="upload-bandwidth">$current_upload_field/s</td></tr>
+    <tr><th>Global Download Limit:</th><td>$download_field KB/s</td></tr>
+    <tr><th>Global Upload Limit:</th><td>$upload_field KB/s</td></tr>
+    <tr><td><a href="/advanced-limits" title="Fine-grained control over bandwidth limits">Advanced Limits</a></td><td align="right">$submit_button</td></tr>
+  </table>
+</div>
+</form>
+END_TABLE
+
+    print CGI::start_table({id=>'torrents'});
+    print "<tr><th>Name</th><th>% Complete</th><th>Download Rate</th><th>Upload Rate</th><th>Seeds</th><th>Leeches</th><th>Downloaded</th><th>Uploaded</th><th>Size</th><th>Ratio</th><th>Action</th></tr>\n";
+    my @torrent_info = sort {
+      ($b->{percent_complete} || 0) <=> ($a->{percent_complete} || 0)
+    } map { torrent_handled_by($_) } torrent_clients();
+
+    for (my $count = 0; $count < @torrent_info; $count++)
+    {
+      my $torrent          = $torrent_info[$count];
+      my $torrent_id       = CGI::escape($torrent->{id});
+      my $torrent_link     = a({href=> "/torrent/" . CGI::escape($torrent->{id})}, $torrent->{name});
+      my $upload_rate      = human_readable($torrent->{upload_rate});
+      my $download_rate    = human_readable($torrent->{download_rate});
+      my $total_seeders    = $torrent->{total_seeders};
+      my $active_seeders   = $torrent->{active_seeders};
+      my $total_leechers   = $torrent->{total_leechers};
+      my $active_leechers  = $torrent->{active_leechers};
+      my $downloaded       = human_readable($torrent->{downloaded}, '0.2f');
+      my $uploaded         = human_readable($torrent->{uploaded}, '0.2f');
+      my $size             = human_readable($torrent->{size}, 'd', '0.2f');
+      my $percent_complete = $torrent->{percent_complete};
+      my $raw_ratio        = ($torrent->{uploaded} == 0) ? 0 :
+      ($torrent->{downloaded} == 0) ? 'Inf.' :
+      $torrent->{uploaded} / $torrent->{downloaded};
+      my $ratio  = ($raw_ratio eq 'Inf.') ? 'Inf.' :
+      sprintf("%.02f", $raw_ratio);
+      my $row_class        = ($count % 2 == 0) ? 'torrent-even' : 'torrent-odd';
+      my $ratio_class      = ($ratio eq 'Inf.' || $ratio >= 2) ?
+      'excellent-ratio' : ($ratio >= 1) ?
+      'good-ratio' : ($ratio >= 0.5) ?
+      'ok-ratio' : 'poor-ratio';
+
+      my $pause_unpause = $torrent->{config}->{pause}->{value} == 1 ? "Resume" : "Pause";
+      $torrent->{config}->{pause}->{value} == 1 && ($row_class .= ' paused');
+
+      my $action_widget=<<END_WIDGET;
+  <form name="$torrent_id" action="/status-action" enctype="application/x-form-www-urlencoded" method="post">
+    <select name="action">
+      <option value="$pause_unpause">$pause_unpause</option>
+      <option value="Update">Update</option>
+      <option value="Quit">Quit</option>
+    </select>
+    <input type="submit" name="submit" value="Ok"/>
+    <input type="hidden" name="torrent-id" value="$torrent_id"/>
+  </form>
+END_WIDGET
+
+      print<<END_ROW;
+  <tr class = "$row_class">
+    <td>$torrent_link</td>
+    <td class="numeric">$percent_complete%</td>
+    <td class="numeric">$download_rate/s</td>
+    <td class="numeric">$upload_rate/s</td>
+    <td class="numeric">$active_seeders/$total_seeders</td>
+    <td class="numeric">$active_leechers/$total_leechers</td>
+    <td class="numeric">$downloaded</td>
+    <td class="numeric">$uploaded</td>
+    <td class="numeric">$size</td>
+    <td class="numeric $ratio_class">$ratio</td>
+    <td>$action_widget</td>
+  </tr>
+END_ROW
+    }
+    print CGI::end_table();
+  };
+}
+
+###############################################################################
+# The stats/info page for a given torrent
+###############################################################################
+
+sub torrent_info_page
+{
+  my $encoded_id     = shift;
+  my $decoded_id     = CGI::unescape($encoded_id);
+  my $torrent_info   = get_torrent_by_id($decoded_id);
+  my $torrent_name   = $torrent_info->{name};
+  my @peers          = sort { $b->{pieces} <=> $a->{pieces} } @{$torrent_info->{peers}};
+  my %config         = %{$torrent_info->{config}};
+  my @files          = @{$torrent_info->{files}};
+  my @config_options = sort keys %config;
+  return with_output_to_string {
+    print h2({id => 'title'}, $torrent_name);
+    print a({style=>'float: right;', href=>'/'}, 'Home');
+    print h3('Peers');
+    print ctcs_peers_table($torrent_info);
+    print h3('Config');
+    print ctcs_config_table($torrent_info);
+    print h3('Files');
+    print ctcs_file_table($torrent_info);
+    print a({style=>'float: right;', href=>'/'}, 'Home');
+  };
+}
+
+sub advanced_limits_page
+{
+  return with_output_to_string {
+    my @clients = torrent_clients();
+    print h2({id => 'title'}, 'Advanced Bandwidth Limits');
+    print h3({style => 'text-align: center' },
+	     sprintf("Global Upload Limit: %s/s; Global Download Limit: %s/s",
+		     human_readable($ctcs{upload_limit}),
+		     human_readable($ctcs{download_limit})));
+    print q(<form action="/set-advanced-limits" method="post" enctype="application/x-form-www-urlencoded">);
+    print q(<table id="torrents">);
+    print q(<tr><th>Torrent</th><th>Upload Limit (KB/s)</th><th>Download Limit (KB/s)</th><th>Auto-Manage</th></tr>);
+    for (my $count = 0; $count < scalar @clients; $count++)
+    {
+      my $client = $clients[$count];
+      my $torrent = torrent_handled_by($client);
+      my $upload_limit = int(($torrent->{manual_upload_limit} || $torrent->{upload_limit}) / 1024);
+      my $download_limit = int(($torrent->{manual_download_limit} || $torrent->{download_limit}) / 1024);
+      my $id = CGI::escape($torrent->{id});
+      my $upload_limit_widget = textfield(-name => "upload-$id",
+					  -size => 6,
+					  -value => $upload_limit);
+      my $download_limit_widget = textfield(-name => "download-$id",
+					    -size => 6,
+					    -value => $download_limit);
+      my $auto_manage_widget = checkbox(-name => "automanage-$id",
+					-label => '',
+					-value => 1,
+					-title => 'Tick to have ctorrent automatically manage bandwidth for this torrent',
+					-checked =>
+					!exists($torrent->{manual_download_limit}) &&
+					!exists($torrent->{manual_upload_limit})
+				       );
+      printf q(<tr class="%s"><td class="numeric">%s</td><td class="numeric">%s</td><td class="numeric">%s</td><td>%s</td></tr>),
+      ($count % 2 == 0) ? 'torrent-even' : 'torrent-odd',
+      $torrent->{name}, $upload_limit_widget, $download_limit_widget, $auto_manage_widget;
+    }
+    print q(<tr><td><a href="/" title="Go to front page">Home</a></td><td colspan="2" align="right"><input type="submit" value="Apply Changes"></td></tr>);
+    print q(</table>);
+    print q(</form>);
+  }
+}
+
+sub ctcs_file_table
+{
+  my $torrent_info = shift;
+  my @files        = @{$torrent_info->{files}};
+
+  return with_output_to_string {
+    print qq(<table id="files">\n);
+    print qq(<tr><th>File</th><th>Size (bytes)</th><th>% Complete</th></tr>\n);
+    for (my $count = 1; $count < scalar @files; $count++)
+    {
+      my $file = $files[$count];
+      printf qq(<tr class="%s"><td>%d: %s</td><td class="numeric">%d</td><td class="numeric">%d%%</td></tr>\n),
+      ($count % 2 == 1) ? 'file-even' : 'file-odd',
+      $count,
+      $file->{name},
+      $file->{size},
+      $file->{percent_done};
+    }
+    print qq(</table>\n);
+  }
+}
+
+sub ctcs_config_table
+{
+  my $torrent_info   = shift;
+  my %config         = %{$torrent_info->{config}};
+  my @config_options = sort keys %config;
+  return with_output_to_string {
+    print q(<form method="post" action="/set-config" enctype="application/x-form-www-urlencoded">);
+    print q(<table id="config">);
+    print q(<tr><th>Option</th><th colspan="2">Value</th></tr>);
+    for (my $count = 0; $count < scalar @config_options; $count++)
+    {
+      printf '<tr class="%s"><td class="numeric">%s</td><td class="numeric">%s</td><td>%s</td></tr>',
+      ($count % 2 == 0) ? 'peer-even' : 'peer-odd',
+      $config{$config_options[$count]}->{short_desc},
+      ctcs_config_table_widget($config_options[$count],
+			       $config{$config_options[$count]}),
+      $config{$config_options[$count]}->{long_desc};
+    }
+    print q(<tr><td></td><td class="numeric"><input type="submit" value="Apply Changes"/></td><td></td></tr>);
+    print q(</table>);
+    printf q(<input type="hidden" name="torrent-id" value="%s"/>), CGI::escape($torrent_info->{id});
+    print q(</form>);
+  }
+}
+
+sub ctcs_config_table_widget
+{
+  my ($field, $option) = @_;
+  return textfield(-name  => $field,
+		   -size  => 12,
+		   -value => $option->{value});
+}
+
+sub ctcs_peers_table
+{
+  my $torrent_info = shift;
+  my @peers        = sort { $b->{pieces} <=> $a->{pieces} } @{$torrent_info->{peers}};
+
+  return with_output_to_string {
+    print q(<table id="peers" width="100%">);
+    printf q(<tr><th></th><th>Address</th><th>Chunks (of %d)</th><th>Uploaded (from you)</th><th>Upload Rate</th><th>Downloaded (to you)</th><th>Download Rate</th></tr>), $torrent_info->{total_chunks};
+    for (my $count = 0; $count < scalar @peers; $count++)
+    {
+      my $peer      = $peers[$count];
+      printf '<tr class="%s"><td class="%s"></td><td class="numeric">%s</td><td class="numeric">%d (%d%%)</td><td class="numeric">%s</td><td class="numeric">%s/s</td><td class="numeric">%s</td><td class="numeric">%s/s</td></tr>',
+      ($count % 2 == 0) ? 'peer-even' : 'peer-odd',
+      ($peer->{pieces} == $torrent_info->{total_chunks}) ? 'seed' : 'leech',
+      $peer->{address},
+      $peer->{pieces},
+      int(($peer->{pieces} / $torrent_info->{total_chunks}) * 100),
+      human_readable($peer->{uploaded}),
+      human_readable($peer->{upload_rate}),
+      human_readable($peer->{downloaded}),
+      human_readable($peer->{download_rate});
+    }
+    print q(</table>);
+  };
+}
+
+###############################################################################
+# A handy page dumping the internals of what's going on
+###############################################################################
+
+sub debug_page
+{
+  return with_output_to_string {
+    print h1('Debug');
+    print CGI::start_pre();
+    print handle_dump();
+    print CGI::end_pre();
+  };
+}
+
+###############################################################################
+# The page you get when no other page matched up to your request
+###############################################################################
+
+sub error_page
+{
+  my $page = shift;
+  return with_output_to_string {
+    print h1('Whoops!');
+    print p("The page you're looking for, $page, doesn't exist!");
+    print a({href=>'/'}, 'Go Home');
+  };
+}
+
+###############################################################################
+# Dumps out a list of currently registered sockets.  This is useful for
+# debugging
+###############################################################################
+
+sub handle_dump
+{
+  return with_output_to_string {
+    print "CTCS\r\n";
+    print Dumper(\%ctcs);
+    print "READERS\n\n";
+    print Dumper($readers);
+    print "WRITERS\n\n";
+    print Dumper($writers);
+    print "MESSAGES\n\n";
+    print Dumper(\%clients);
+  };
+}
+
+###############################################################################
+# Note download/upload figures for a particular client.
+###############################################################################
+
+sub record_bandwidth
+{
+  my ($client, $dlrate, $ulrate) = @_;
+  my $info = torrent_handled_by($client);
+  $info->{upload_rate}   = $ulrate;
+  $info->{download_rate} = $dlrate;
+  my $total = exists($info->{total_chunks}) ? $info->{total_chunks} : 0;
+  my $downloaded = exists($info->{downloaded_chunks}) ? $info->{downloaded_chunks} : 0;
+  $info->{percent_complete} = $total == 0 ?
+  0 : int(($downloaded / $total) * 100);
+}
+
+###############################################################################
+# Handles internal registration of the given torrent.  Until explicitly
+# de-registered, this torrent will remain on this server's list for the
+# server lifetime.
+###############################################################################
+
+sub handle_register_torrent
+{
+  my ($socket, $torrent_id, $start_time, $current_time, $torrent_name) = @_;
+
+  my $info = {};
+  $info->{name}               = $torrent_name;
+  $info->{id}                 = $torrent_id;
+  $info->{config}             = { pause => {value => 0}};
+  $info->{percent_complete}   = 0;
+  $info->{files}              = [];
+  $info->{peers}              = [];
+  $info->{active_seeders}     = 0;
+  $info->{total_seeders}      = 0;
+  $info->{active_leechers}    = 0;
+  $info->{total_leechers}     = 0;
+  $info->{total_connections}  = 0;
+  $info->{downloaded_chunks}  = 0;
+  $info->{total_chunks}       = 0;
+  $info->{available_chunks}   = 0;
+  $info->{download_rate}      = 0;
+  $info->{upload_rate}        = 0;
+  $info->{downloaded}         = 0;
+  $info->{uploaded}           = 0;
+  $info->{download_limit}     = 0;
+  $info->{upload_limit}       = 0;
+  $info->{cache_used}         = 0;
+  $info->{last_detail_update} = 0;
+  $info->{size}               = 0;
+
+  $clients{$socket}->{torrent} = $info;
+}
+
+###############################################################################
+# Reads a single line of text from the given socket.  A line is terminated
+# by a newline character ('\n').
+# * If the line is successfully read, this method returns the completed line.
+# * If a full line cannot be read (but *something* is) this method returns
+#   undef, and $! is EAGAIN.  The partially read string is stored for
+#   a later read.
+# * If nothing can be read, and the underlying read hasn't set $!, this
+#   method returns undef: check $! to determine what has happened.
+###############################################################################
+
+sub ctcs_getline
+{
+  my $client   = shift;
+  my $fragment = $clients{$client}->{partial_read} || '';
+  my $offset   = length($fragment);
+  my $newline  = qr/\n$/o;
+  for ( ; $offset < 1024; $offset++)
+  {
+    my $result = sysread($client, $fragment, 1, $offset);
+    if (!defined($result))
+    {
+      if ($! == EAGAIN)
+      {
+        $clients{$client}->{partial_read} = $fragment;
+      }
+      else
+      {
+        delete($clients{$client}->{partial_read});
+      }
+      return undef;
+    }
+    last if $fragment =~ $newline || $result == 0;
+  }
+
+  delete($clients{$client}->{partial_read});
+  $fragment =~ s/(^|\S)\s*$/$1/;
+  return $fragment;
+}
+
+###############################################################################
+# A simple logger.
+###############################################################################
+
+sub ctcs_log
+{
+  return if $_[0] < $ctcs{log_level} && $_[0] != LOG_TEMP;
+  my ($level, $format) = (shift, shift);
+  if ($ctcs{log_timestamps})
+  {
+    print strftime("%H:%M:%S, %a, %b %d %Y", localtime()), ": ";
+  }
+  printf $format, @_;
+  print "\n";
+}
+
+###############################################################################
+# Given a socket, returns a hash reference with keys representing information
+# about a torrent file (the most important usually being 'name')
+###############################################################################
+
+sub torrent_handled_by
+{
+  my $client = shift;
+  return $clients{$client}->{torrent};
+}
+
+###############################################################################
+# Returns a list of sockets that are supplying torrent data (as opposed to
+# connections from the Web interface
+###############################################################################
+
+sub torrent_clients
+{
+  my @torrent_clients = ();
+  foreach my $client(keys %clients)
+  {
+    push(@torrent_clients, $client) if exists($clients{$client}->{torrent});
+  }
+  return @torrent_clients;
+}
+
+###############################################################################
+# Returns the number of torrents that are registered with this server
+###############################################################################
+
+sub number_of_registered_torrents
+{
+  return scalar torrent_clients;
+}
+
+###############################################################################
+# Figures out what the average bandwidth for each register torrent should be
+# given the global download and upload limits.
+###############################################################################
+
+sub autobalance_bandwidth
+{
+  my @torrent_clients  = torrent_clients();
+  my $client_count     = scalar(@torrent_clients) || 1;
+  my $uploader_count   = 0;
+  my $downloader_count = 0;
+
+  foreach my $client(@torrent_clients)
+  {
+    my $torrent  = torrent_handled_by($client);
+    my $complete = $torrent->{percent_complete} eq '100';
+    my $paused   = $torrent->{config}->{pause}->{value} eq '1';
+    $uploader_count++ unless $paused;
+    $downloader_count++ unless ($paused || $complete);
+  }
+
+  $uploader_count   ||= 1;
+  $downloader_count ||= 1;
+
+  foreach my $client(@torrent_clients)
+  {
+    my $torrent  = torrent_handled_by($client);
+    my $paused   = $torrent->{config}->{pause}->{value} == 1;
+    my $complete = $torrent->{percent_complete} == 100;
+
+    my $upload_limit   = $paused ? 0 :
+    (exists($torrent->{manual_upload_limit})) ?
+    $torrent->{manual_upload_limit}  :
+    int($ctcs{upload_limit} / $uploader_count);
+
+    my $download_limit = ($paused || $complete) ? 0 :
+    (exists($torrent->{manual_download_limit})) ?
+    $torrent->{manual_download_limit} :
+    int($ctcs{download_limit} / $downloader_count);
+
+    if ($upload_limit != $torrent->{upload_limit})
+    {
+      torrent_set_bandwidth_limit($torrent, 'upload', $upload_limit);
+    }
+    if ($download_limit != $torrent->{download_limit})
+    {
+      torrent_set_bandwidth_limit($torrent, 'download', $download_limit);
+    }
+  }
+}
+
+###############################################################################
+# Sends the given string as a message to the given client.  This doesn't
+# happen immediately: the message is queued for sending with the next
+# write loop.
+###############################################################################
+
+sub send_message
+{
+  my ($message, $client) = @_;
+  send_message_function(writer_function(sub { $message }), $client);
+}
+
+###############################################################################
+# Adds the given writer function to the message queue of the given client.
+# As with send_message, the send doesn't happen immediately.
+###############################################################################
+
+sub send_message_function
+{
+  my ($function, $client) = @_;
+  $clients{$client}->{messages} = [] unless exists $clients{$client}->{messages};
+  push(@{$clients{$client}->{messages}}, $function);
+  $writers->add($client);
+}
+
+###############################################################################
+# For a given id, find the torrent subhash in %clients that contains the
+# information about that torrent.  Return undef if no such torrent is found
+###############################################################################
+
+sub get_torrent_by_id
+{
+  my $id = shift;
+
+  foreach my $client(keys %clients)
+  {
+    if (exists($clients{$client}->{torrent}) &&
+	$clients{$client}->{torrent}->{id} eq $id)
+    {
+      return $clients{$client}->{torrent};
+    }
+  }
+  return undef;
+}
+
+sub get_client_by_id
+{
+  my $id = shift;
+
+  foreach my $client(keys %clients)
+  {
+    if (exists($clients{$client}->{torrent}) &&
+	$clients{$client}->{torrent}->{id} eq $id)
+    {
+      return $client;
+    }
+  }
+  return undef;
+}
+
+###############################################################################
+# Returns a two element list containing the total download and upload bandwidth
+# figures for torrents registered with this server.
+###############################################################################
+
+sub total_used_bandwidth
+{
+  my $total_upload = 0;
+  my $total_download = 0;
+  foreach my $client(torrent_clients())
+  {
+    $total_upload   += ($clients{$client}->{torrent}->{upload_rate} || 0);
+    $total_download += ($clients{$client}->{torrent}->{download_rate} || 0);
+  }
+  return ($total_download, $total_upload);
+}
+
+###############################################################################
+# Which protocol version?
+# (kinda redundant as I don't pay attention to it anywhere yet.
+###############################################################################
+
+sub ctcs_protocol
+{
+  return $ctcs{protocol};
+}
+
+###############################################################################
+# The command that should be sent to get more detail
+###############################################################################
+
+sub ctcs_request_detail_command
+{
+  return "SENDDETAIL\r\n";
+}
+
+sub ctcs_request_status_command
+{
+  return "SENDSTATUS\r\n";
+}
+
+sub ctcs_request_config_command
+{
+  return "SENDCONF\r\n";
+}
+
+sub ctcs_request_peers_command
+{
+  return "SENDPEERS\r\n";
+}
+
+###############################################################################
+# Given the torrent info subhash and the detail string returned by
+# an incoming CTFILE, populates the torrent hash with the details
+# After this is complete, $torrent_info{files} is a list reference, indexed
+# by file number (in the torrent), and where each element is a hash reference
+# containing the 'size' and 'name' keys.
+###############################################################################
+
+sub torrent_populate_file_info
+{
+  my ($torrent_info, $detail_string) = @_;
+  my ($fnum, $fpri, $curpri, $fnp, $fnh, $fna, $fsize, $fname) =
+  split(/\s+/, $detail_string, 8);
+  $torrent_info->{files} ||= [];
+  $torrent_info->{files}->[$fnum] ||= {};
+  $torrent_info->{files}->[$fnum]->{size} = $fsize;
+  $torrent_info->{files}->[$fnum]->{name} = $fname;
+  $torrent_info->{files}->[$fnum]->{percent_done} = $fnp ? 100 * $fnh / $fnp : 0;
+}
+
+sub torrent_update_detail
+{
+  torrent_update_only_after_minimum_time(shift,
+					 'last_detail_update',
+					 5,
+					 \&torrent_request_detail_from);
+}
+
+sub torrent_update_status
+{
+  torrent_update_only_after_minimum_time(shift,
+					 'last_status_update',
+					 10,
+					 \&torrent_request_status_from);
+}
+
+sub torrent_update_config
+{
+  torrent_update_only_after_minimum_time(shift,
+					 'last_config_update',
+					 10,
+					 \&torrent_request_config_from);
+}
+
+sub torrent_update_peers
+{
+  torrent_update_only_after_minimum_time(shift,
+					 'last_peers_update',
+					 30,
+					 \&torrent_request_peers_from);
+}
+
+sub ctcs_update_bandwidth_allocation
+{
+  ctcs_update_only_after_minimum_time('last_bandwidth_update',
+				      10,
+				      \&autobalance_bandwidth);
+}
+
+sub torrent_update_only_after_minimum_time
+{
+  my ($client, $field, $interval, $request_function) = @_;
+  my $torrent_info = torrent_handled_by($client);
+  my $time = time();
+  if (!exists($torrent_info->{$field}) ||
+      ($time - $torrent_info->{$field} > $interval))
+  {
+    $request_function->($client);
+    $torrent_info->{$field} = $time;
+  }
+}
+
+sub ctcs_update_only_after_minimum_time
+{
+  my ($field, $interval, $function, @args) = @_;
+  my $time = time();
+  if (!exists($ctcs{$field}) || ($time - $ctcs{$field} > $interval))
+  {
+    $function->(@args);
+    $ctcs{$field} = $time;
+  }
+}
+
+sub torrent_set_status
+{
+  my ($torrent_info, $status_line) = @_;
+
+  # Apologies for the horrendous pattern match.
+  $1 =~ m!^
+	  (\d+):(\d+)/       # Active seeds, and total seeders
+	  (\d+):(\d+)/       # Active leechers, and total leechers
+	  (\d+)              # Total connections
+	  \s+
+	  (\d+)/(\d+)/(\d+)  # Chunks downloaded, total, and available
+	  \s+
+	  (\d+),(\d+)        # Download/upload rates
+	  \s+
+	  (\d+),(\d+)        # Total downloaded/uploaded
+	  \s+
+	  (\d+),(\d+)        # Download/upload limits
+	  \s+
+	  (\d+)              # Cache used
+	 !x;
+
+  $torrent_info->{active_seeders}     = $1;
+  $torrent_info->{total_seeders}      = $2;
+  $torrent_info->{active_leechers}    = $3;
+  $torrent_info->{total_leechers}     = $4;
+  $torrent_info->{total_connections}  = $5;
+  $torrent_info->{downloaded_chunks}  = $6;
+  $torrent_info->{total_chunks}       = $7;
+  $torrent_info->{available_chunks}   = $8;
+  $torrent_info->{download_rate}      = $9;
+  $torrent_info->{upload_rate}        = $10;
+  $torrent_info->{downloaded}         = $11;
+  $torrent_info->{uploaded}           = $12;
+  $torrent_info->{download_limit}     = $13;
+  $torrent_info->{upload_limit}       = $14;
+  $torrent_info->{cache_used}         = $15;
+  $torrent_info->{last_detail_update} = time();
+}
+
+################################################################################
+# Asynchronously sends a SENDDETAIL request to the given client.
+###############################################################################
+
+sub torrent_request_status_from
+{
+  send_message(ctcs_request_status_command(), shift);
+}
+
+sub torrent_request_detail_from
+{
+  send_message(ctcs_request_detail_command(), shift);
+}
+
+sub torrent_request_peers_from
+{
+  send_message(ctcs_request_peers_command(), shift);
+}
+
+sub torrent_request_config_from
+{
+  send_message(ctcs_request_config_command(), shift);
+}
+
+sub torrent_store_config
+{
+  my ($torrent, $config_line) = @_;
+  if ($config_line =~ /(\S+)      # element name
+                       \s+
+                       (\S+)      # element type
+                       \s+
+                       (\S+)      # element range
+                       \s+
+                       (\d+):     # element length
+                      /gx)
+  {
+    my ($short_description, $long_description);
+    my ($element, $type, $range, $value_length) = ($1, $2, $3, $4);
+    my $value = substr($config_line, pos($config_line), $value_length);
+    my $length = $1 if $config_line =~ /\s*(\d+):/g;
+    if ($length)
+    {
+      $short_description = substr($config_line, pos($config_line), $length);
+    }
+    $length = $1 if $config_line =~ /(\d+):/g;
+    if ($length)
+    {
+      $long_description = substr($config_line, pos($config_line), $length);
+    }
+    $torrent->{config}->{$element} = {short_desc => ($short_description || ''),
+                                      long_desc  => ($long_description || ''),
+                                      type       => $type,
+                                      range      => $range,
+                                      value      => $value};
+  }
+}
+
+sub torrent_add_peer
+{
+  my ($torrent_info, $peer_description) = @_;
+  if ($peer_description =~ /
+                             ([^\s]+)    # Peer id
+                             \s+
+                             ([\d.:]+)   # IP address
+                             \s+
+                             ([CU][in])([CU][in]) # Choked-interested
+                             \s+
+                             (\d+)       # Download rate
+                             \s+
+                             (\d+)       # Upload rate
+                             \s+
+                             (\d+)       # Downloaded
+                             \s+
+                             (\d+)       # Uploaded
+                             \s+
+                             (\d+)       # pieces
+                           /x)
+  {
+    push(@{$torrent_info->{incoming_peers}},
+         {id            => $1,
+          address       => $2,
+          remote_flags  => $3,
+          local_flags   => $4,
+          download_rate => $5,
+          upload_rate   => $6,
+          downloaded    => $7,
+          uploaded      => $8,
+          pieces        => $9});
+  }
+}
+
+sub torrent_set_manual_bandwidth_limit
+{
+  my ($torrent, $direction, $limit) = @_;
+  $torrent->{"manual_${direction}_limit"} = $limit;
+  torrent_set_bandwidth_limit($torrent, $direction, $limit);
+}
+
+sub torrent_set_bandwidth_limit
+{
+  my ($torrent, $direction, $limit) = @_;
+  my $message = ($direction eq 'upload') ? 'U' : 'D';
+  my $client = get_client_by_id($torrent->{id});
+  if ($direction eq 'upload')
+  {
+    $torrent->{upload_limit} = $limit;
+  }
+  elsif ($direction eq 'download')
+  {
+    $torrent->{download_limit} = $limit;
+  }
+  else
+  {
+    ctcs_log(LOG_WARNING,
+	     "Cannot set bandwidth for unknown direction '$direction'");
+    return;
+  }
+  ctcs_log(LOG_INFO,
+	   "Setting %s limit of '%s' to %d",
+	   $direction,
+	   $torrent->{name},
+	   $limit);
+  send_message(sprintf("SET${message}LIMIT %.0f\r\n", $limit), $client);
+}
+
+sub torrent_quit
+{
+  send_message("CTQUIT\r\n", get_client_by_id((shift)->{id}));
+}
+
+sub torrent_update
+{
+  send_message("CTUPDATE\r\n", get_client_by_id((shift)->{id}));
+}
+
+sub torrent_pause
+{
+  torrent_set_config(shift, 'pause', 1);
+}
+
+sub torrent_is_paused
+{
+  my ($torrent) = @_;
+  return $torrent->{config}->{pause}->{value} == 1;
+}
+
+sub torrent_resume
+{
+  torrent_set_config(shift, 'pause', 0);
+}
+
+sub torrent_set_config
+{
+  my ($torrent, $config_option, $value) = @_;
+  my $client = get_client_by_id($torrent->{id});
+  if (!defined($client))
+  {
+    ctcs_log(LOG_WARNING,
+	     "Cannot set config on torrent '%s': it has no active connection",
+	     $torrent->{name});
+    return;
+  }
+  else
+  {
+    ctcs_log(LOG_INFO,
+	     "Setting config option '%s' of '%s' to '%s'",
+	     $config_option, $torrent->{name}, $value);
+  }
+  send_message(sprintf("CTCONFIG %s %s\r\n", $config_option, $value), $client);
+  torrent_request_config_from($client);
+}
+
+###############################################################################
+# Given a number that is assumed to be a number of bytes, returns a string
+# that truncates that number with a useful suffix (i.e. 'MB' or 'GB').
+# If a format specifier is given, it is used the format the number.  If an
+# additional 'small format' specifier is given, it is used instead of the
+# normal specifier if the number is less than 10.
+###############################################################################
+
+sub human_readable
+{
+  my $number       = shift;
+  my $format       = shift || 'd';
+  my $small_format = shift || $format;
+
+  $number          = $1 if $number =~ /(\d+)/;
+
+  my @range   = ('B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB'); # Future proofing...
+  my $current = 0;
+  ($number /= 1024) && $current++ while $number > 1024;
+
+  return $number < 10 ?
+  sprintf("%$small_format %s", $number, $range[$current]) :
+  sprintf("%$format %s", $number, $range[$current]);
+}
+
+###############################################################################
+# A bit of profiling on FreeBSD showed that gethostbyaddr is quite expensive,
+# and invoking it every time a message is received (for the debug log)
+# actually ramped up CPU time to almost twice what it was versus this caching
+# version
+###############################################################################
+
+sub address_of
+{
+  my $client = shift;
+  unless (exists $clients{$client}->{address})
+  {
+    $clients{$client}->{address} =
+    (gethostbyaddr($client->peeraddr(), AF_INET))[0];
+  }
+  return $clients{$client}->{address};
+}
+
+sub peer_count_for
+{
+  my $info = torrent_handled_by(shift);
+  return scalar @{$info->{peers}}
+}
+
+###############################################################################
+# The stylesheet that every page should use.
+###############################################################################
+
+sub stylesheet
+{
+  my $sheet = <<END_CSS;
+body { font-family: Arial, sans-serif; margin-left: 10%; margin-right: 10%; margin-top: 5%; margin-bottom: 5%; }
+#title { text-align: center; }
+.torrent-even, .peer-even, .file-even { background-color: #ded; }
+.torrent-odd, .peer-odd, .file-odd, div#global-bandwidth-limits { background-color: #efe; }
+div#global-bandwidth-limits { width: 100%; padding: 1em; }
+div#global-bandwidth-limits table { margin-left: auto; margin-right: auto; }
+div#global-bandwidth-limits table th { text-align: left; }
+table#torrents { margin-top: 3em; }
+table#torrents, table#files, table#peers, table#config {width: 100%; border-collapse: collapse; margin-left: auto; margin-right: auto; font-size: smaller; }
+table#files { width: auto; }
+.torrent-even, .peer-even, .file-even { border-width: 1px; border-style: solid; border-color: #cdc; border-top-color: #fff; }
+.torrent-odd, .peer-odd, .file-odd { border-width: 1px; border-style: solid; border-color: #bcb; border-top-color: #efe; }
+td.numeric { text-align: center; }
+#upload-bandwidth, .excellent-ratio { color: #3b3; }
+.good-ratio { color: #292; }
+.ok-ratio { color: #992; }
+#download-bandwidth, .poor-ratio { color: #a22; }
+#upload-bandwidth, #download-bandwidth { font-weight: bold; }
+td.seed, td.leech, .paused { filter:alpha(opacity=50); opacity: 0.5; -moz-opacity:0.5; }
+td.seed { width: 1em; background-color: #3b3; }
+td.leech { width: 1em; background-color: #a22; }
+END_CSS
+}
+__END__
+
+BSD LICENCE
+
+Copyright (c) 2009 Danny Woods
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.
+3. The name of the author may not be used to endorse or promote products
+   derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+HACKING GUIDE
+-------------
+
+aims
+----
+
+Externals
+
+CTCS should remain a single file with Perl as its sole prerequisite.  This is
+for ease of distribution.  At the time of this writing, Perl 5.8 is the
+standard Perl on Linux, BSD, etc., so please limit language features and
+modules to those available with a vanilla distribution of that version.
+
+Internals
+
+All state relating to a given client is in %clients, keyed by client socket.
+The great advantage of this is that cleaning up all information related to a
+given connection is a simple matter of grabbing hold of the socket, deleting
+the %clients entry, and then closing the socket.  This greatly reduces the
+chance of zombie connections.
+
+Torrent info for an individual (torrent-supplying) client is in
+$clients{a-client}->{torrent}.
+
+All state pertaining to the server itself is in %ctcs.
+
+Any new state added at a later date should be part of these two top-level
+hashes (unless, of course, it clearly belongs to neither).
+
+The code is single-threaded and uniprocess, and is simple, efficient and easy
+to debug as a result.  Please resist the urge to change this.  Yes, periodic
+updates of config information, peers, etc. would be nice in a separate thread
+rather than in the top-level 'select' loop, but I would rather avoid the
+headaches of synchronised access to the %clients hash.
+
+Useful Bits
+-----------
+
+The '/debug' page on the web UI shows the current state of the core data
+structures used by the program: it is extremely useful for data visualisation.
+
+function_to_handle_request
+
+This is the primary function for deciding how to deal with an incoming request.
+For HTTP GETs and POSTs, it gets the entire request as a string.  Messages
+from a ctorrent instance are a single line.
+New request types will probably call for a new branch on the
+conditional, with a new function to handle them.
+
+Requests that are not implemented yield a warning in the logs, but otherwise
+do not hinder the operation of the server.
+
+TODOs
+-----
+
+*) Automatic bandwidth management is clunky right now.  Every incoming torrent
+that neither completed or paused gets an even slice of the global downoad
+bandwidth limit; same for uploads, except that completed downloads continue to
+get their slice of available bandwidth.  It would be much nicer if bandwidth
+usage was monitored over time, and slices adjusted on the fly (DIFFICULT)
+
+*) Config variables are typed: make use of this type information to use the
+appropriate HTML control, rather than the current textfield (checkboxes for booleans, for example) (SIMPLE)

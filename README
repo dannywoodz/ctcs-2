@@ -1,0 +1,32 @@
+ctcs2 is an alternative to Dennis Holmes's CTorrent Control Server.  It aims
+for efficiency, simple extensibility and clarity of code.
+
+PREREQUISITES
+-------------
+
+ctcs2 is written in Perl: you'll need a Perl interpreter on your system to run
+it.  It has been developed against Perl 5.8 on FreeBSD, Linux and Mac OS X and
+makes use of only standard modules.  You might have success running it on
+Windows, either with a native Perl like ActivePerl
+(http://www.activestate.com/activeperl/) or using Cygwin
+(http://www.cygwin.com/), but I haven't tried  that.
+
+
+GETTING STARTED
+---------------
+
+At the command prompt:
+
+perl -T ctcs2 --port=8080
+
+ctcs2 runs in the foreground, so you'll probably want to make use of something
+like daemontools (http://cr.yp.to/daemontools.html) or GNU screen
+(http://www.gnu.org/software/screen/).
+
+Run ctcs2 with the --help switch to see available command line options.  There
+aren't that many.
+
+If you use ctcs2 and like it/hate it/have improvement suggestions, please drop
+me a note at dannywoodz@yahoo.co.uk.
+
+                                                           Danny
