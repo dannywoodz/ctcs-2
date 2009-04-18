@@ -87,7 +87,7 @@ use constant LOG_ERROR   => 4;
 
 $SIG{INT}  = \&cleanup;
 $SIG{TERM} = \&cleanup;
-$|         = 1; # Autoflush STDOUT
+$|         = 1;			# Autoflush STDOUT
 
 my $port                    = 8080;
 my $download_limit          = 1000;
@@ -169,8 +169,8 @@ my %ctcs;
 GetOptions('port=i'       => \$port,
            'download=i'   => \$download_limit,
            'upload=i'     => \$upload_limit,
-	   'no-log-times' => \$suppress_log_timestamps,
-	   'help'         => \$help);
+           'no-log-times' => \$suppress_log_timestamps,
+           'help'         => \$help);
 
 ###############################################################################
 # Usage
@@ -188,11 +188,11 @@ if ($help)
 ###############################################################################
 
 my $server = IO::Socket::INET->new(LocalPort => $port,
-				   ReuseAddr => 1,
-				   Type      => SOCK_STREAM,
-				   Blocking  => 0,
-				   Proto     => 'tcp',
-				   Listen    => SOMAXCONN) || die $!;
+                                   ReuseAddr => 1,
+                                   Type      => SOCK_STREAM,
+                                   Blocking  => 0,
+                                   Proto     => 'tcp',
+                                   Listen    => SOMAXCONN) || die $!;
 
 my $readers  = IO::Select->new();
 my $writers  = IO::Select->new();
@@ -218,25 +218,25 @@ ctcs_log(LOG_INFO, "CTCS Server started on port $port");
 # Main loop
 ###############################################################################
 
-for(my $last_update = time(); defined($server); )
+for (my $last_update = time(); defined($server); )
 {
   my ($readable, $writable, $errors) =
-    IO::Select::select($readers, $writers, $errors, 1);
+  IO::Select::select($readers, $writers, $errors, 1);
   handle_write($_) for @$writable;
   handle_read($_)  for @$readable;
   handle_error($_) for @$errors;
 
-  if(time() != $last_update)
+  if (time() != $last_update)
   {
-    foreach my $client(torrent_clients())
+    foreach my $client (torrent_clients())
     {
       my $torrent = torrent_handled_by($client);
       unless(torrent_is_paused($torrent))
       {
-	torrent_update_detail($client);
-	torrent_update_status($client);
-	torrent_update_peers($client);
-	torrent_update_config($client);
+        torrent_update_detail($client);
+        torrent_update_status($client);
+        torrent_update_peers($client);
+        torrent_update_config($client);
       }
       ctcs_update_bandwidth_allocation();
     }
@@ -273,12 +273,12 @@ sub cleanup
 sub handle_read
 {
   my $socket = shift;
-  if ($socket == $server) # New client connection
+  if ($socket == $server)	# New client connection
   {
     register_new_client($socket->accept());
     $ctcs{accepted_connections}++;
   }
-  else # Incoming data on a client handle
+  else				# Incoming data on a client handle
   {
     handle_request($socket);
   }
@@ -295,9 +295,9 @@ sub register_new_client
   my $client = shift;
   $client->sockopt(O_NONBLOCK | TCP_NODELAY, 1);
   ctcs_log(LOG_INFO,
-	   "connection from %s on port %d",
-	   address_of($client),
-	   $client->peerport());
+           "connection from %s on port %d",
+           address_of($client),
+           $client->peerport());
   $clients{$client} = {};
   $clients{$client}->{messages} = [];
   $readers->add($client);
@@ -320,8 +320,8 @@ sub deregister_client
   }
   delete $clients{$client};
   ctcs_log(LOG_INFO,
-	   "connection closed%s",
-	   (defined($hostname)) ? " from $hostname" : "");
+           "connection closed%s",
+           (defined($hostname)) ? " from $hostname" : "");
   $readers->remove($client) while $readers->exists($client);
   $writers->remove($client) while $writers->exists($client);
   $client->shutdown(2);
@@ -413,26 +413,25 @@ sub reader_function_for
     $function = $clients{$socket}->{reader} = sub {
       my $client = $_[0];
       my ($line, $result);
-      while(!$header_read && defined($line = ctcs_getline($client)))
+      while (!$header_read && defined($line = ctcs_getline($client)))
       {
         if (scalar @header == 0)
         {
           return $line unless $line =~ /^(?:POST|GET)/;
         }
-	$content_length = $1 if $line =~ /^Content-Length: (\d+)/;
-	ctcs_log(LOG_DEBUG, "Header line: '%s'", $line);
-	push(@header, $line);
-	$header_read = 1 if $line eq '';
+        $content_length = $1 if $line =~ /^Content-Length: (\d+)/;
+        ctcs_log(LOG_DEBUG, "Header line: '%s'", $line);
+        push(@header, $line);
+        $header_read = 1 if $line eq '';
       }
       return undef unless defined($line);
 
       ctcs_log(LOG_DEBUG, "Content-Length: %s", $content_length);
       ctcs_log(LOG_DEBUG, "BEFORE: Length of body is %d", length($body));
 
-      while($content_length > 0 &&
-            defined($result = sysread($client, $body, length($body),
-				      $content_length - length($body))))
-      {
+      while ($content_length > 0 &&
+	     defined($result = sysread($client, $body, length($body),
+				       $content_length - length($body)))) {
       }
 
       ctcs_log(LOG_DEBUG, "AFTER: Length of body is %d", length($body));
@@ -493,14 +492,14 @@ sub writer_function
     ctcs_log(LOG_DEBUG, "Writing %d bytes of length %d, starting at %d", $message_length - $message_offset, $message_length, $message_offset);
 
     my $written = syswrite($client,
-			   $message,
-			   $message_length - $message_offset,
-			   $message_offset);
+                           $message,
+                           $message_length - $message_offset,
+                           $message_offset);
     if (!defined($written))
     {
       ctcs_log(LOG_WARNING, "Failed to write message '%s', starting at index %d",
                $message,
-	       $message_length - $message_offset);
+               $message_length - $message_offset);
       return 1; # The message is effectively finished if it has errored
     }
 
@@ -539,7 +538,7 @@ sub handle_write
   my $client = shift;
   my $messages = $clients{$client}->{messages};
 
-  while($messages && @$messages)
+  while ($messages && @$messages)
   {
     my $function = $messages->[0];
     last if !$function->($client);
@@ -561,19 +560,19 @@ sub function_to_handle_request
 
   $_ = $message;
 
-  if(/^CTBW\s+(\d+),\s*(\d+)\s+(\d+),\s*(\d+)/)
+  if (/^CTBW\s+(\d+),\s*(\d+)\s+(\d+),\s*(\d+)/)
   {
     record_bandwidth($client, $1, $2);
   }
-  elsif(/^CTPEER\s+(.*)/)
+  elsif (/^CTPEER\s+(.*)/)
   {
     torrent_add_peer(torrent_handled_by($client), $1);
   }
-  elsif(/^CTCONFIG\s+(.*)/)
+  elsif (/^CTCONFIG\s+(.*)/)
   {
     torrent_store_config(torrent_handled_by($client), $1);
   }
-  elsif(/^CTFILE\s+(.*)/)
+  elsif (/^CTFILE\s+(.*)/)
   {
     ctcs_log(LOG_DEBUG, "Got a file: %s", $1);
     torrent_populate_file_info(torrent_handled_by($client), $1);
@@ -585,13 +584,13 @@ sub function_to_handle_request
   elsif (/^CTPEERSDONE/)
   {
     ctcs_log(LOG_INFO, "Received %d peers for '%s'",
-	     peer_count_for($client),
-	     torrent_handled_by($client)->{name});
+             peer_count_for($client),
+             torrent_handled_by($client)->{name});
     $clients{$client}->{torrent}->{peers} = $clients{$client}->{torrent}->{incoming_peers};
     $clients{$client}->{torrent}->{incoming_peers} = [];
     $clients{$client}->{torrent}->{last_peers_update} = time();
   }
-  elsif(/^CTSTATUS\s+(.*)/)
+  elsif (/^CTSTATUS\s+(.*)/)
   {
     my $torrent_info = torrent_handled_by($client);
     torrent_set_status($torrent_info, $1);
@@ -599,7 +598,7 @@ sub function_to_handle_request
     null_writer_function() :
     writer_function(\&ctcs_request_detail_command);
   }
-  elsif(/^CTDETAIL\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/)
+  elsif (/^CTDETAIL\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/)
   {
     my $torrent_info = torrent_handled_by($client);
     $torrent_info->{size}       = $1;
@@ -625,7 +624,7 @@ sub function_to_handle_request
   {
     return writer_function(\&handle_dump);
   }
-  elsif(/^PROTOCOL\s+0*(\d+)/)
+  elsif (/^PROTOCOL\s+0*(\d+)/)
   {
     $ctcs{protocol} = $1;
   }
@@ -667,8 +666,8 @@ sub handle_send_page
       print start_html(-title => 'CTCS 2',
                        -head  => style({type => 'text/css'},
                                        stylesheet())),
-            $page_content,
-            end_html();
+				       $page_content,
+				       end_html();
     };
     $response_code = '200 OK';
   }
@@ -676,8 +675,8 @@ sub handle_send_page
   {
     $page = with_output_to_string {
       print start_html({title => 'CTCS 2 - Page Not Found'}),
-            error_page($page),
-            end_html();
+      error_page($page),
+      end_html();
     };
     $response_code = '404 Not Found';
   }
@@ -737,14 +736,13 @@ sub handle_form_submission
       $params->{$_} =~ s/(\S)\s*$/$1/;
       $params->{$_} = CGI::unescape($params->{$_});
       if (exists($config->{$_}) &&
-	  $config->{$_}->{value} ne $params->{$_})
-      {
-	#######################################################################
-	# When changing CTCS server, *don't* go back to the info for this page:
-	# it belongs to another server
-	#######################################################################
-	$page = "/" if $_ eq 'ctcs_server';
-	torrent_set_config($torrent, $_, $params->{$_});
+          $config->{$_}->{value} ne $params->{$_}) {
+        #######################################################################
+        # When changing CTCS server, *don't* go back to the info for this page:
+        # it belongs to another server
+        #######################################################################
+        $page = "/" if $_ eq 'ctcs_server';
+        torrent_set_config($torrent, $_, $params->{$_});
       }
     } keys %$params;
 
@@ -761,23 +759,23 @@ sub handle_form_submission
 
       if (defined($operation) && defined($id))
       {
-	my $torrent = get_torrent_by_id(CGI::unescape($id));
-	if ($operation eq 'upload' || $operation eq 'download')
-	{
-	  unless(exists($params->{"automanage-$id"}))
-	  {
-	    torrent_set_manual_bandwidth_limit($torrent,
-					       $operation,
-					       $params->{$_} * 1024);
-	  }
-	}
-	elsif($operation eq 'automanage')
-	{
-	  ctcs_log(LOG_INFO, "Automatically managing bandwidth allocation for '%s'",
-		   $torrent->{name});
-	  delete $torrent->{manual_upload_limit};
-	  delete $torrent->{manual_download_limit};
-	}
+        my $torrent = get_torrent_by_id(CGI::unescape($id));
+        if ($operation eq 'upload' || $operation eq 'download')
+        {
+          unless (exists($params->{"automanage-$id"}))
+          {
+            torrent_set_manual_bandwidth_limit($torrent,
+                                               $operation,
+                                               $params->{$_} * 1024);
+          }
+        }
+        elsif ($operation eq 'automanage')
+        {
+          ctcs_log(LOG_INFO, "Automatically managing bandwidth allocation for '%s'",
+                   $torrent->{name});
+          delete $torrent->{manual_upload_limit};
+          delete $torrent->{manual_download_limit};
+        }
       }
     } keys %$params;
     return with_output_to_string {
@@ -810,15 +808,15 @@ sub index_page
     my $current_download_field = human_readable($download_bandwidth);
     my $current_upload_field = human_readable($upload_bandwidth);
     my $download_field = textfield({name=> 'dlimit',
-				    value => ($ctcs{download_limit} / 1024),
+                                    value => ($ctcs{download_limit} / 1024),
                                     maxlength => 6,
                                     size => 6});
     my $upload_field = textfield({name=> 'ulimit',
-				  value=> ($ctcs{upload_limit} / 1024),
+                                  value=> ($ctcs{upload_limit} / 1024),
                                   maxlength => 6,
                                   size => 6});
     my $submit_button = submit({name=>'submit-bandwidth-changes',
-				value=>'Apply Changes'});
+                                value=>'Apply Changes'});
     print<<END_TABLE;
 <form action="/" method="post" enctype="application/x-form-www-urlencoded">
 <div id="global-bandwidth-limits">
@@ -933,9 +931,9 @@ sub advanced_limits_page
     my @clients = torrent_clients();
     print h2({id => 'title'}, 'Advanced Bandwidth Limits');
     print h3({style => 'text-align: center' },
-	     sprintf("Global Upload Limit: %s/s; Global Download Limit: %s/s",
-		     human_readable($ctcs{upload_limit}),
-		     human_readable($ctcs{download_limit})));
+             sprintf("Global Upload Limit: %s/s; Global Download Limit: %s/s",
+                     human_readable($ctcs{upload_limit}),
+                     human_readable($ctcs{download_limit})));
     print q(<form action="/set-advanced-limits" method="post" enctype="application/x-form-www-urlencoded">);
     print q(<table id="torrents">);
     print q(<tr><th>Torrent</th><th>Upload Limit (KB/s)</th><th>Download Limit (KB/s)</th><th>Auto-Manage</th></tr>);
@@ -947,19 +945,19 @@ sub advanced_limits_page
       my $download_limit = int(($torrent->{manual_download_limit} || $torrent->{download_limit}) / 1024);
       my $id = CGI::escape($torrent->{id});
       my $upload_limit_widget = textfield(-name => "upload-$id",
-					  -size => 6,
-					  -value => $upload_limit);
+                                          -size => 6,
+                                          -value => $upload_limit);
       my $download_limit_widget = textfield(-name => "download-$id",
-					    -size => 6,
-					    -value => $download_limit);
+                                            -size => 6,
+                                            -value => $download_limit);
       my $auto_manage_widget = checkbox(-name => "automanage-$id",
-					-label => '',
-					-value => 1,
-					-title => 'Tick to have ctorrent automatically manage bandwidth for this torrent',
-					-checked =>
-					!exists($torrent->{manual_download_limit}) &&
-					!exists($torrent->{manual_upload_limit})
-				       );
+                                        -label => '',
+                                        -value => 1,
+                                        -title => 'Tick to have ctorrent automatically manage bandwidth for this torrent',
+                                        -checked =>
+                                        !exists($torrent->{manual_download_limit}) &&
+                                        !exists($torrent->{manual_upload_limit})
+                                       );
       printf q(<tr class="%s"><td class="numeric">%s</td><td class="numeric">%s</td><td class="numeric">%s</td><td>%s</td></tr>),
       ($count % 2 == 0) ? 'torrent-even' : 'torrent-odd',
       $torrent->{name}, $upload_limit_widget, $download_limit_widget, $auto_manage_widget;
@@ -1007,8 +1005,8 @@ sub ctcs_config_table
       ($count % 2 == 0) ? 'peer-even' : 'peer-odd',
       $config{$config_options[$count]}->{short_desc},
       ctcs_config_table_widget($config_options[$count],
-			       $config{$config_options[$count]}),
-      $config{$config_options[$count]}->{long_desc};
+                               $config{$config_options[$count]}),
+			       $config{$config_options[$count]}->{long_desc};
     }
     print q(<tr><td></td><td class="numeric"><input type="submit" value="Apply Changes"/></td><td></td></tr>);
     print q(</table>);
@@ -1021,8 +1019,8 @@ sub ctcs_config_table_widget
 {
   my ($field, $option) = @_;
   return textfield(-name  => $field,
-		   -size  => 12,
-		   -value => $option->{value});
+                   -size  => 12,
+                   -value => $option->{value});
 }
 
 sub ctcs_peers_table
@@ -1227,7 +1225,7 @@ sub torrent_handled_by
 sub torrent_clients
 {
   my @torrent_clients = ();
-  foreach my $client(keys %clients)
+  foreach my $client (keys %clients)
   {
     push(@torrent_clients, $client) if exists($clients{$client}->{torrent});
   }
@@ -1255,7 +1253,7 @@ sub autobalance_bandwidth
   my $uploader_count   = 0;
   my $downloader_count = 0;
 
-  foreach my $client(@torrent_clients)
+  foreach my $client (@torrent_clients)
   {
     my $torrent  = torrent_handled_by($client);
     my $complete = $torrent->{percent_complete} eq '100';
@@ -1267,7 +1265,7 @@ sub autobalance_bandwidth
   $uploader_count   ||= 1;
   $downloader_count ||= 1;
 
-  foreach my $client(@torrent_clients)
+  foreach my $client (@torrent_clients)
   {
     my $torrent  = torrent_handled_by($client);
     my $paused   = $torrent->{config}->{pause}->{value} == 1;
@@ -1328,11 +1326,10 @@ sub get_torrent_by_id
 {
   my $id = shift;
 
-  foreach my $client(keys %clients)
+  foreach my $client (keys %clients)
   {
     if (exists($clients{$client}->{torrent}) &&
-	$clients{$client}->{torrent}->{id} eq $id)
-    {
+        $clients{$client}->{torrent}->{id} eq $id) {
       return $clients{$client}->{torrent};
     }
   }
@@ -1343,11 +1340,10 @@ sub get_client_by_id
 {
   my $id = shift;
 
-  foreach my $client(keys %clients)
+  foreach my $client (keys %clients)
   {
     if (exists($clients{$client}->{torrent}) &&
-	$clients{$client}->{torrent}->{id} eq $id)
-    {
+        $clients{$client}->{torrent}->{id} eq $id) {
       return $client;
     }
   }
@@ -1363,7 +1359,7 @@ sub total_used_bandwidth
 {
   my $total_upload = 0;
   my $total_download = 0;
-  foreach my $client(torrent_clients())
+  foreach my $client (torrent_clients())
   {
     $total_upload   += ($clients{$client}->{torrent}->{upload_rate} || 0);
     $total_download += ($clients{$client}->{torrent}->{download_rate} || 0);
@@ -1428,40 +1424,40 @@ sub torrent_populate_file_info
 sub torrent_update_detail
 {
   torrent_update_only_after_minimum_time(shift,
-					 'last_detail_update',
-					 5,
-					 \&torrent_request_detail_from);
+                                         'last_detail_update',
+                                         5,
+                                         \&torrent_request_detail_from);
 }
 
 sub torrent_update_status
 {
   torrent_update_only_after_minimum_time(shift,
-					 'last_status_update',
-					 10,
-					 \&torrent_request_status_from);
+                                         'last_status_update',
+                                         10,
+                                         \&torrent_request_status_from);
 }
 
 sub torrent_update_config
 {
   torrent_update_only_after_minimum_time(shift,
-					 'last_config_update',
-					 10,
-					 \&torrent_request_config_from);
+                                         'last_config_update',
+                                         10,
+                                         \&torrent_request_config_from);
 }
 
 sub torrent_update_peers
 {
   torrent_update_only_after_minimum_time(shift,
-					 'last_peers_update',
-					 30,
-					 \&torrent_request_peers_from);
+                                         'last_peers_update',
+                                         30,
+                                         \&torrent_request_peers_from);
 }
 
 sub ctcs_update_bandwidth_allocation
 {
   ctcs_update_only_after_minimum_time('last_bandwidth_update',
-				      10,
-				      \&autobalance_bandwidth);
+                                      10,
+                                      \&autobalance_bandwidth);
 }
 
 sub torrent_update_only_after_minimum_time
@@ -1470,8 +1466,7 @@ sub torrent_update_only_after_minimum_time
   my $torrent_info = torrent_handled_by($client);
   my $time = time();
   if (!exists($torrent_info->{$field}) ||
-      ($time - $torrent_info->{$field} > $interval))
-  {
+      ($time - $torrent_info->{$field} > $interval)) {
     $request_function->($client);
     $torrent_info->{$field} = $time;
   }
@@ -1494,20 +1489,20 @@ sub torrent_set_status
 
   # Apologies for the horrendous pattern match.
   $1 =~ m!^
-	  (\d+):(\d+)/       # Active seeds, and total seeders
-	  (\d+):(\d+)/       # Active leechers, and total leechers
-	  (\d+)              # Total connections
-	  \s+
-	  (\d+)/(\d+)/(\d+)  # Chunks downloaded, total, and available
-	  \s+
-	  (\d+),(\d+)        # Download/upload rates
-	  \s+
-	  (\d+),(\d+)        # Total downloaded/uploaded
-	  \s+
-	  (\d+),(\d+)        # Download/upload limits
-	  \s+
-	  (\d+)              # Cache used
-	 !x;
+          (\d+):(\d+)/       # Active seeds, and total seeders
+          (\d+):(\d+)/       # Active leechers, and total leechers
+          (\d+)              # Total connections
+          \s+
+          (\d+)/(\d+)/(\d+)  # Chunks downloaded, total, and available
+          \s+
+          (\d+),(\d+)        # Download/upload rates
+          \s+
+          (\d+),(\d+)        # Total downloaded/uploaded
+          \s+
+          (\d+),(\d+)        # Download/upload limits
+          \s+
+          (\d+)              # Cache used
+         !x;
 
   $torrent_info->{active_seeders}     = $1;
   $torrent_info->{total_seeders}      = $2;
@@ -1561,8 +1556,7 @@ sub torrent_store_config
                        (\S+)      # element range
                        \s+
                        (\d+):     # element length
-                      /gx)
-  {
+                      /gx) {
     my ($short_description, $long_description);
     my ($element, $type, $range, $value_length) = ($1, $2, $3, $4);
     my $value = substr($config_line, pos($config_line), $value_length);
@@ -1603,8 +1597,7 @@ sub torrent_add_peer
                              (\d+)       # Uploaded
                              \s+
                              (\d+)       # pieces
-                           /x)
-  {
+                           /x) {
     push(@{$torrent_info->{incoming_peers}},
          {id            => $1,
           address       => $2,
@@ -1641,14 +1634,14 @@ sub torrent_set_bandwidth_limit
   else
   {
     ctcs_log(LOG_WARNING,
-	     "Cannot set bandwidth for unknown direction '$direction'");
+             "Cannot set bandwidth for unknown direction '$direction'");
     return;
   }
   ctcs_log(LOG_INFO,
-	   "Setting %s limit of '%s' to %d",
-	   $direction,
-	   $torrent->{name},
-	   $limit);
+           "Setting %s limit of '%s' to %d",
+           $direction,
+           $torrent->{name},
+           $limit);
   send_message(sprintf("SET${message}LIMIT %.0f\r\n", $limit), $client);
 }
 
@@ -1685,15 +1678,15 @@ sub torrent_set_config
   if (!defined($client))
   {
     ctcs_log(LOG_WARNING,
-	     "Cannot set config on torrent '%s': it has no active connection",
-	     $torrent->{name});
+             "Cannot set config on torrent '%s': it has no active connection",
+             $torrent->{name});
     return;
   }
   else
   {
     ctcs_log(LOG_INFO,
-	     "Setting config option '%s' of '%s' to '%s'",
-	     $config_option, $torrent->{name}, $value);
+             "Setting config option '%s' of '%s' to '%s'",
+             $config_option, $torrent->{name}, $value);
   }
   send_message(sprintf("CTCONFIG %s %s\r\n", $config_option, $value), $client);
   torrent_request_config_from($client);
@@ -1790,10 +1783,10 @@ modification, are permitted provided that the following conditions
 are met:
 
 1. Redistributions of source code must retain the above copyright
-   notice, this list of conditions and the following disclaimer.
+notice, this list of conditions and the following disclaimer.
 2. Redistributions in binary form must reproduce the above copyright
-   notice, this list of conditions and the following disclaimer in the
-   documentation and/or other materials provided with the distribution.
+notice, this list of conditions and the following disclaimer in the
+documentation and/or other materials provided with the distribution.
 3. The name of the author may not be used to endorse or promote products
    derived from this software without specific prior written permission.
 
