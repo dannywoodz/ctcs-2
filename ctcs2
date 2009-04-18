@@ -675,7 +675,7 @@ sub handle_send_page
   {
     $page = with_output_to_string {
       print start_html({title => 'CTCS 2 - Page Not Found'}),
-      error_page($page),
+      error_page($location),
       end_html();
     };
     $response_code = '404 Not Found';
@@ -705,12 +705,8 @@ sub handle_form_submission
   }
   elsif ($target eq "/status-action")
   {
-    my $action = $query->param('action');
-    my $id     = CGI::unescape($query->param('torrent-id'));
-
-    $action =~ s/(\S)\s*$/$1/;
-    $id =~ s/(\S)\s*$/$1/;
-
+    my $action  = $query->param('action');
+    my $id      = CGI::unescape($query->param('torrent-id'));
     my $torrent = get_torrent_by_id($id);
 
     torrent_pause($torrent)  if $action eq 'Pause';
@@ -727,13 +723,10 @@ sub handle_form_submission
   {
     my $params = $query->Vars;
     my $id = $params->{'torrent-id'};
-    $id =~ s/(\S)\s*$/$1/ if $id;
     my $page = $id ? "/torrent/$id" : '/';
     my $torrent = get_torrent_by_id(CGI::unescape($id));
     my $config = $torrent->{config};
-
     map {
-      $params->{$_} =~ s/(\S)\s*$/$1/;
       $params->{$_} = CGI::unescape($params->{$_});
       if (exists($config->{$_}) &&
           $config->{$_}->{value} ne $params->{$_}) {
@@ -907,6 +900,9 @@ sub torrent_info_page
   my $encoded_id     = shift;
   my $decoded_id     = CGI::unescape($encoded_id);
   my $torrent_info   = get_torrent_by_id($decoded_id);
+
+  return undef if !defined($torrent_info);
+
   my $torrent_name   = $torrent_info->{name};
   my @peers          = sort { $b->{pieces} <=> $a->{pieces} } @{$torrent_info->{peers}};
   my %config         = %{$torrent_info->{config}};
