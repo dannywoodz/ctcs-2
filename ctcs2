@@ -73,7 +73,7 @@ use IO::String;
 use Socket 'TCP_NODELAY';
 use Fcntl 'O_NONBLOCK';
 use Errno 'EAGAIN';
-use CGI::Pretty qw(:standard);
+use CGI qw(:standard);
 use Getopt::Long;
 use POSIX qw(strftime);
 use Data::Dumper;
@@ -318,7 +318,7 @@ sub deregister_client
     ctcs_log(LOG_WARNING, "CLIENT BEING DELETED WITH A NON-EMPTY MESSAGE QUEUE");
     my $string = IO::String->new();
     $_->($string) for @{$clients{$client}->{messages}};
-    print ${$string->string_ref()}, "\n";
+    ctcs_log(LOG_WARNING, ${$string->string_ref()});
   }
   delete $clients{$client};
   ctcs_log(LOG_INFO,
@@ -514,7 +514,9 @@ sub writer_function
     $message_offset += $written;
     my $finished = ($message_offset == $message_length);
 
-    ctcs_log(LOG_DEBUG, "Wrote %d bytes, leaving %d remaining. Message is%s finished\n", $written, $message_length - $message_offset, $finished ? "" : " NOT");
+    ctcs_log(LOG_DEBUG,
+	     "Wrote %d bytes, leaving %d remaining. Message is%s finished",
+	     $written, $message_length - $message_offset, $finished ? "" : " NOT");
 
     shift(@{$clients{$client}->{messages}}) && deregister_client($client) if ($finished && $close_after_write);
     return $finished;
