@@ -1046,7 +1046,7 @@ sub ctcs_peers_table
       print Tr({class => ($count % 2 == 0) ? 'peer-even' : 'peer-odd'},
                td({class => ($peer->{pieces} == $torrent_info->{total_chunks}) ? 'seed' : 'leech'}),
                td({class => 'numeric'}, $peer->{address}),
-               td({class => 'numeric'}, $peer->{pieces}, '(', int(($peer->{pieces} / $torrent_info->{total_chunks}) * 100), ')'),
+               td({class => 'numeric'}, $peer->{pieces}, '(', int(($peer->{pieces} / $torrent_info->{total_chunks}) * 100), '%)'),
                td({class => 'numeric'}, human_readable($peer->{uploaded})),
                td({class => 'numeric'}, human_readable($peer->{upload_rate})),
                td({class => 'numeric'}, human_readable($peer->{downloaded})),
