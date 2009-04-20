@@ -822,8 +822,8 @@ sub index_page
     print start_form(-method => 'post', -action => '/', -enctype => $CGI::URL_ENCODED);
     print div({id => 'global-bandwidth-limits'},
               table(
-                    Tr(th('Current Download Bandwidth:'), td({class => 'numeric', id => 'download-bandwidth'}, $current_download_field, '/s')),
-                    Tr(th('Current Upload Bandwidth:'), td({class => 'numeric', id => 'upload-bandwidth'}, $current_upload_field, '/s')),
+                    Tr(th('Current Download Bandwidth:'), td({class => 'numeric', id => 'download-bandwidth'}, $current_download_field . '/s')),
+                    Tr(th('Current Upload Bandwidth:'), td({class => 'numeric', id => 'upload-bandwidth'}, $current_upload_field . '/s')),
                     Tr(th('Global Download Limit:'), td($download_field, ' KB/s')),
                     Tr(th('Global Upload Limit:'), td($upload_field, ' KB/s')),
                     Tr(td(a({href  => '/advanced-limits',
@@ -1046,7 +1046,8 @@ sub ctcs_peers_table
       print Tr({class => ($count % 2 == 0) ? 'peer-even' : 'peer-odd'},
                td({class => ($peer->{pieces} == $torrent_info->{total_chunks}) ? 'seed' : 'leech'}),
                td({class => 'numeric'}, $peer->{address}),
-               td({class => 'numeric'}, $peer->{pieces}, '(', int(($peer->{pieces} / $torrent_info->{total_chunks}) * 100), '%)'),
+               td({class => 'numeric'}, $peer->{pieces},
+                  sprintf('(%d%%)', int(($peer->{pieces} / $torrent_info->{total_chunks}) * 100))),
                td({class => 'numeric'}, human_readable($peer->{uploaded})),
                td({class => 'numeric'}, human_readable($peer->{upload_rate})),
                td({class => 'numeric'}, human_readable($peer->{downloaded})),
