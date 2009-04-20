@@ -426,9 +426,6 @@ sub reader_function_for
       }
       return undef unless $header_read;
 
-      ctcs_log(LOG_DEBUG, "Content-Length: %s", $content_length);
-      ctcs_log(LOG_DEBUG, "BEFORE: Length of body is %d", length($body));
-
       while ($content_length > 0 &&
              length($body) < $content_length &&
 	     defined($result = sysread($client, $body, 
@@ -437,9 +434,6 @@ sub reader_function_for
       {
         last if $result == 0;
       }
-
-      ctcs_log(LOG_DEBUG, "AFTER: Length of body is %d", length($body));
-      ctcs_log(LOG_DEBUG, "Body is '%s'", $body);
 
       if (!defined($result) && length($body) < $content_length)
       {
