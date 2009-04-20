@@ -255,7 +255,7 @@ sub cleanup
 {
   if ($server)
   {
-    print "Cleaning up\n";
+    ctcs_log(LOG_INFO, "Cleaning up");
     $readers->remove($server);
     $server->shutdown(2);
     $server->close();
