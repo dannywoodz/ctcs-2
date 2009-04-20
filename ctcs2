@@ -73,12 +73,13 @@ use IO::String;
 use Socket 'TCP_NODELAY';
 use Fcntl 'O_NONBLOCK';
 use Errno 'EAGAIN';
-use CGI qw(:standard);
+use CGI::Pretty qw(:standard);
 use Getopt::Long;
 use POSIX qw(strftime);
 use Data::Dumper;
 use strict;
 use warnings;
+use diagnostics;
 use constant LOG_TEMP    => 0;
 use constant LOG_DEBUG   => 1;
 use constant LOG_INFO    => 2;
@@ -211,6 +212,7 @@ $ctcs{closed_connections}   = 0;
 $ctcs{port}                 = $port;
 $ctcs{log_timestamps}       = !$suppress_log_timestamps;
 $ctcs{log_level}            = LOG_INFO;
+$ctcs{log_file_handle}      = \*STDOUT;
 
 ctcs_log(LOG_INFO, "CTCS Server started on port $port");
 
@@ -426,6 +428,9 @@ sub reader_function_for
       }
       return undef unless $header_read;
 
+      ctcs_log(LOG_DEBUG, "Content-Length: %s", $content_length);
+      ctcs_log(LOG_DEBUG, "BEFORE: Length of body is %d", length($body));
+
       while ($content_length > 0 &&
              length($body) < $content_length &&
 	     defined($result = sysread($client, $body, 
@@ -434,6 +439,9 @@ sub reader_function_for
       {
         last if $result == 0;
       }
+
+      ctcs_log(LOG_DEBUG, "AFTER: Length of body is %d", length($body));
+      ctcs_log(LOG_DEBUG, "Body is '%s'", $body);
 
       if (!defined($result) && length($body) < $content_length)
       {
@@ -808,23 +816,26 @@ sub index_page
                                   size => 6});
     my $submit_button = submit({name=>'submit-bandwidth-changes',
                                 value=>'Apply Changes'});
-    print<<END_TABLE;
-<form action="/" method="post" enctype="application/x-form-www-urlencoded">
-<div id="global-bandwidth-limits">
-  <table>
-    <tr><th>Current Download Bandwidth:</th><td class="numeric" id="download-bandwidth">$current_download_field/s</td></tr>
-    <tr><th>Current Upload Bandwidth:</th><td class="numeric" id="upload-bandwidth">$current_upload_field/s</td></tr>
-    <tr><th>Global Download Limit:</th><td>$download_field KB/s</td></tr>
-    <tr><th>Global Upload Limit:</th><td>$upload_field KB/s</td></tr>
-    <tr><td><a href="/advanced-limits" title="Fine-grained control over bandwidth limits">Advanced Limits</a></td><td align="right">$submit_button</td></tr>
-  </table>
-</div>
-</form>
-END_TABLE
 
-    print CGI::start_table({id=>'torrents'});
-    print "<tr><th>Name</th><th>% Complete</th><th>Download Rate</th><th>Upload Rate</th><th>Seeds</th><th>Leeches</th><th>Downloaded</th><th>Uploaded</th><th>Size</th><th>Ratio</th><th>Action</th></tr>\n";
-    my @torrent_info = sort {
+    print start_form(-method => 'post', -action => '/', -enctype => $CGI::URL_ENCODED);
+    print div({id => 'global-bandwidth-limits'},
+              table(
+                    Tr(th('Current Download Bandwidth:'), td({class => 'numeric', id => 'download-bandwidth'}, $current_download_field, '/s')),
+                    Tr(th('Current Upload Bandwidth:'), td({class => 'numeric', id => 'upload-bandwidth'}, $current_upload_field, '/s')),
+                    Tr(th('Global Download Limit:'), td($download_field, ' KB/s')),
+                    Tr(th('Global Upload Limit:'), td($upload_field, ' KB/s')),
+                    Tr(td(a({href  => '/advanced-limits',
+                             title => 'Fine-grained control over bandwidth limits'},
+                            'Advanced Limits')),
+                       td({align => 'right'}, $submit_button))));
+    print end_form();
+
+    print CGI::start_table({id => 'torrents'});
+    print Tr(th('Name'), th('% Complete'), th('Download Rate'), th('Upload Rate'),
+             th('Seeds'), th('Leeches'), th('Downloaded'), th('Uploaded'),
+             th('Size'), th('Ratio'), th('Action'));
+
+    my @torrent_info           =  sort {
       ($b->{percent_complete} || 0) <=> ($a->{percent_complete} || 0)
     } map { torrent_handled_by($_) } torrent_clients();
 
@@ -857,33 +868,25 @@ END_TABLE
       my $pause_unpause = $torrent->{config}->{pause}->{value} == 1 ? "Resume" : "Pause";
       $torrent->{config}->{pause}->{value} == 1 && ($row_class .= ' paused');
 
-      my $action_widget=<<END_WIDGET;
-  <form name="$torrent_id" action="/status-action" enctype="application/x-form-www-urlencoded" method="post">
-    <select name="action">
-      <option value="$pause_unpause">$pause_unpause</option>
-      <option value="Update">Update</option>
-      <option value="Quit">Quit</option>
-    </select>
-    <input type="submit" name="submit" value="Ok"/>
-    <input type="hidden" name="torrent-id" value="$torrent_id"/>
-  </form>
-END_WIDGET
-
-      print<<END_ROW;
-  <tr class = "$row_class">
-    <td>$torrent_link</td>
-    <td class="numeric">$percent_complete%</td>
-    <td class="numeric">$download_rate/s</td>
-    <td class="numeric">$upload_rate/s</td>
-    <td class="numeric">$active_seeders/$total_seeders</td>
-    <td class="numeric">$active_leechers/$total_leechers</td>
-    <td class="numeric">$downloaded</td>
-    <td class="numeric">$uploaded</td>
-    <td class="numeric">$size</td>
-    <td class="numeric $ratio_class">$ratio</td>
-    <td>$action_widget</td>
-  </tr>
-END_ROW
+      print Tr({class => $row_class},
+               td($torrent_link),
+               td({class => 'numeric'}, $percent_complete, '%'),
+               td({class => 'numeric'}, $download_rate, '/s'),
+               td({class => 'numeric'}, $upload_rate, '/s'),
+               td({class => 'numeric'}, $active_seeders, '/', $total_seeders),
+               td({class => 'numeric'}, $active_leechers, '/', $total_leechers),
+               td({class => 'numeric'}, $downloaded),
+               td({class => 'numeric'}, $uploaded),
+               td({class => 'numeric'}, $size),
+               td({class => "numeric $ratio_class"}, $ratio),
+               td(start_form(-name => $torrent_id, -action => '/status-action', -method => 'post', -enctype => $CGI::URL_ENCODED),
+                  Select({name => 'action'},
+                         option({value => $pause_unpause}, $pause_unpause),
+                         option({value => 'Update'}, 'Update'),
+                         option({value => 'Quit'}, 'Quit')),
+                  submit(-name => 'submit', -value => 'Ok'),
+                  hidden(-name => 'torrent-id', -value => $torrent_id),
+                  end_form()));
     }
     print CGI::end_table();
   };
@@ -928,15 +931,18 @@ sub advanced_limits_page
              sprintf("Global Upload Limit: %s/s; Global Download Limit: %s/s",
                      human_readable($ctcs{upload_limit}),
                      human_readable($ctcs{download_limit})));
-    print q(<form action="/set-advanced-limits" method="post" enctype="application/x-form-www-urlencoded">);
-    print q(<table id="torrents">);
-    print q(<tr><th>Torrent</th><th>Upload Limit (KB/s)</th><th>Download Limit (KB/s)</th><th>Auto-Manage</th></tr>);
+    print start_form(-action => '/set-advanced-limits',
+                     -method => 'post',
+                     -enctype => $CGI::URL_ENCODED);
+    print CGI::start_table({id => 'torrents'});
+    print Tr(th('Torrent'), th('Upload Limit (KB/s)'), th('Download Limit (KB/s)'), th('Auto-Manage'));
+
     for (my $count = 0; $count < scalar @clients; $count++)
     {
       my $client = $clients[$count];
       my $torrent = torrent_handled_by($client);
-      my $upload_limit = int(($torrent->{manual_upload_limit} || $torrent->{upload_limit}) / 1024);
-      my $download_limit = int(($torrent->{manual_download_limit} || $torrent->{download_limit}) / 1024);
+      my $upload_limit = int(($torrent->{manual_upload_limit} || $torrent->{upload_limit} || 0) / 1024);
+      my $download_limit = int(($torrent->{manual_download_limit} || $torrent->{download_limit} || 0) / 1024);
       my $id = CGI::escape($torrent->{id});
       my $upload_limit_widget = textfield(-name => "upload-$id",
                                           -size => 6,
@@ -952,13 +958,17 @@ sub advanced_limits_page
                                         !exists($torrent->{manual_download_limit}) &&
                                         !exists($torrent->{manual_upload_limit})
                                        );
-      printf q(<tr class="%s"><td class="numeric">%s</td><td class="numeric">%s</td><td class="numeric">%s</td><td>%s</td></tr>),
-      ($count % 2 == 0) ? 'torrent-even' : 'torrent-odd',
-      $torrent->{name}, $upload_limit_widget, $download_limit_widget, $auto_manage_widget;
+      print Tr({class => ($count % 2) == 0 ? 'torrent-even' : 'torrent-odd'},
+               td($torrent->{name}),
+               td($upload_limit_widget),
+               td($download_limit_widget),
+               td($auto_manage_widget)
+);
     }
-    print q(<tr><td><a href="/" title="Go to front page">Home</a></td><td colspan="2" align="right"><input type="submit" value="Apply Changes"></td></tr>);
-    print q(</table>);
-    print q(</form>);
+    print Tr(td(a({href => '/', title => 'Go to front page'}, 'Home')),
+             td({colspan => '2', align => 'right'}, submit(-value => 'Apply Changes')));
+    print CGI::end_table();
+    print end_form();
   }
 }
 
@@ -968,19 +978,18 @@ sub ctcs_file_table
   my @files        = @{$torrent_info->{files}};
 
   return with_output_to_string {
-    print qq(<table id="files">\n);
-    print qq(<tr><th>File</th><th>Size (bytes)</th><th>% Complete</th></tr>\n);
+    print CGI::start_table({id => 'files'});
+    print Tr(th('File'), th('Size (bytes)'), th('% Complete'));
+
     for (my $count = 1; $count < scalar @files; $count++)
     {
       my $file = $files[$count];
-      printf qq(<tr class="%s"><td>%d: %s</td><td class="numeric">%d</td><td class="numeric">%d%%</td></tr>\n),
-      ($count % 2 == 1) ? 'file-even' : 'file-odd',
-      $count,
-      $file->{name},
-      $file->{size},
-      $file->{percent_done};
+      print Tr({class => ($count % 2 == 1) ? 'file-even' : 'file-odd'},
+               td($count, ': ', $file->{name}),
+               td({class => 'numeric'}, $file->{size}),
+               td({class => 'numeric'}, $file->{percent_done}));
     }
-    print qq(</table>\n);
+    print CGI::end_table();
   }
 }
 
@@ -990,22 +999,24 @@ sub ctcs_config_table
   my %config         = %{$torrent_info->{config}};
   my @config_options = sort keys %config;
   return with_output_to_string {
-    print q(<form method="post" action="/set-config" enctype="application/x-form-www-urlencoded">);
-    print q(<table id="config">);
-    print q(<tr><th>Option</th><th colspan="2">Value</th></tr>);
+    print start_form(-method  => 'post',
+                     -action  => '/set-config',
+                     -enctype => $CGI::URL_ENCODED);
+    print CGI::start_table({id => 'config'});
+    print Tr(th('Option'), th({colspan => 2}, 'Value'));
+
     for (my $count = 0; $count < scalar @config_options; $count++)
     {
-      printf '<tr class="%s"><td class="numeric">%s</td><td class="numeric">%s</td><td>%s</td></tr>',
-      ($count % 2 == 0) ? 'peer-even' : 'peer-odd',
-      $config{$config_options[$count]}->{short_desc},
-      ctcs_config_table_widget($config_options[$count],
-                               $config{$config_options[$count]}),
-			       $config{$config_options[$count]}->{long_desc};
+      print Tr({class => ($count % 2 == 0) ? 'peer-even' : 'peer-odd'},
+               td({class => 'numeric'}, $config{$config_options[$count]}->{short_desc}),
+               td({class => 'numeric'}, ctcs_config_table_widget($config_options[$count],
+                                                                 $config{$config_options[$count]})),
+               td($config{$config_options[$count]}->{long_desc}));
     }
-    print q(<tr><td></td><td class="numeric"><input type="submit" value="Apply Changes"/></td><td></td></tr>);
-    print q(</table>);
-    printf q(<input type="hidden" name="torrent-id" value="%s"/>), CGI::escape($torrent_info->{id});
-    print q(</form>);
+    print Tr(td(), td({class => 'numeric'}, submit(-value => 'Apply Changes')), td());
+    print CGI::end_table();
+    print hidden(-name => 'torrent-id', -value => CGI::escape($torrent_info->{id}));
+    print end_form();
   }
 }
 
@@ -1023,23 +1034,23 @@ sub ctcs_peers_table
   my @peers        = sort { $b->{pieces} <=> $a->{pieces} } @{$torrent_info->{peers}};
 
   return with_output_to_string {
-    print q(<table id="peers" width="100%">);
-    printf q(<tr><th></th><th>Address</th><th>Chunks (of %d)</th><th>Uploaded (from you)</th><th>Upload Rate</th><th>Downloaded (to you)</th><th>Download Rate</th></tr>), $torrent_info->{total_chunks};
+    print CGI::start_table({id => 'peers', width => '100%'});
+    print Tr(th(), th('Address'), th('Chunks (of ', $torrent_info->{total_chunks}, ')'),
+             th('Uploaded (from you)'), th('Upload Rate'),
+             th('Downloaded (to you)'), th('Download Rate'));
     for (my $count = 0; $count < scalar @peers; $count++)
     {
       my $peer      = $peers[$count];
-      printf '<tr class="%s"><td class="%s"></td><td class="numeric">%s</td><td class="numeric">%d (%d%%)</td><td class="numeric">%s</td><td class="numeric">%s/s</td><td class="numeric">%s</td><td class="numeric">%s/s</td></tr>',
-      ($count % 2 == 0) ? 'peer-even' : 'peer-odd',
-      ($peer->{pieces} == $torrent_info->{total_chunks}) ? 'seed' : 'leech',
-      $peer->{address},
-      $peer->{pieces},
-      int(($peer->{pieces} / $torrent_info->{total_chunks}) * 100),
-      human_readable($peer->{uploaded}),
-      human_readable($peer->{upload_rate}),
-      human_readable($peer->{downloaded}),
-      human_readable($peer->{download_rate});
+      print Tr({class => ($count % 2 == 0) ? 'peer-even' : 'peer-odd'},
+               td({class => ($peer->{pieces} == $torrent_info->{total_chunks}) ? 'seed' : 'leech'}),
+               td({class => 'numeric'}, $peer->{address}),
+               td({class => 'numeric'}, $peer->{pieces}, '(', int(($peer->{pieces} / $torrent_info->{total_chunks}) * 100), ')'),
+               td({class => 'numeric'}, human_readable($peer->{uploaded})),
+               td({class => 'numeric'}, human_readable($peer->{upload_rate})),
+               td({class => 'numeric'}, human_readable($peer->{downloaded})),
+               td({class => 'numeric'}, human_readable($peer->{download_rate})));
     }
-    print q(</table>);
+    print CGI::end_table();
   };
 }
 
@@ -1192,12 +1203,13 @@ sub ctcs_log
 {
   return if $_[0] < $ctcs{log_level} && $_[0] != LOG_TEMP;
   my ($level, $format) = (shift, shift);
+  my $log = $ctcs{log_file_handle} || \*STDOUT;
   if ($ctcs{log_timestamps})
   {
-    print strftime("%H:%M:%S, %a, %b %d %Y", localtime()), ": ";
+    print $log strftime("%H:%M:%S, %a, %b %d %Y", localtime()), ": ";
   }
-  printf $format, @_;
-  print "\n";
+  printf $log $format, @_;
+  print $log "\n";
 }
 
 ###############################################################################
@@ -1700,6 +1712,7 @@ sub human_readable
   my $format       = shift || 'd';
   my $small_format = shift || $format;
 
+  return "" if !defined($number);
   $number          = $1 if $number =~ /(\d+)/;
 
   my @range   = ('B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB'); # Future proofing...
