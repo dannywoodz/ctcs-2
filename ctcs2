@@ -855,7 +855,7 @@ sub index_page
       my $downloaded       = human_readable($torrent->{downloaded}, '0.2f');
       my $uploaded         = human_readable($torrent->{uploaded}, '0.2f');
       my $size             = human_readable($torrent->{size}, 'd', '0.2f');
-      my $percent_complete = $torrent->{percent_complete};
+      my $percent_complete = sprintf('%d%%', $torrent->{percent_complete});
       my $raw_ratio        = ($torrent->{uploaded} == 0) ? 0 :
       ($torrent->{downloaded} == 0) ? 'Inf.' :
       $torrent->{uploaded} / $torrent->{downloaded};
@@ -872,7 +872,7 @@ sub index_page
 
       print Tr({class => $row_class},
                td($torrent_link),
-               td({class => 'numeric'}, $percent_complete, '%'),
+               td({class => 'numeric'}, $percent_complete),
                td({class => 'numeric'}, $download_rate, '/s'),
                td({class => 'numeric'}, $upload_rate, '/s'),
                td({class => 'numeric'}, $active_seeders, '/', $total_seeders),
@@ -989,7 +989,7 @@ sub ctcs_file_table
       print Tr({class => ($count % 2 == 1) ? 'file-even' : 'file-odd'},
                td($count, ': ', $file->{name}),
                td({class => 'numeric'}, $file->{size}),
-               td({class => 'numeric'}, $file->{percent_done}));
+               td({class => 'numeric'}, int($file->{percent_done})));
     }
     print CGI::end_table();
   }
