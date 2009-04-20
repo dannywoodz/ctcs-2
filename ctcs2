@@ -424,14 +424,18 @@ sub reader_function_for
         push(@header, $line);
         $header_read = 1 if $line eq '';
       }
-      return undef unless defined($line);
+      return undef unless $header_read;
 
       ctcs_log(LOG_DEBUG, "Content-Length: %s", $content_length);
       ctcs_log(LOG_DEBUG, "BEFORE: Length of body is %d", length($body));
 
       while ($content_length > 0 &&
-	     defined($result = sysread($client, $body, length($body),
-				       $content_length - length($body)))) {
+             length($body) < $content_length &&
+	     defined($result = sysread($client, $body, 
+				       $content_length - length($body),
+                                       length($body))))
+      {
+        last if $result == 0;
       }
 
       ctcs_log(LOG_DEBUG, "AFTER: Length of body is %d", length($body));
