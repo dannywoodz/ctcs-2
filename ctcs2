@@ -433,11 +433,10 @@ sub reader_function_for
 
       while ($content_length > 0 &&
              length($body) < $content_length &&
-	     defined($result = sysread($client, $body, 
-				       $content_length - length($body),
-                                       length($body))))
+	     defined($result = ctcs_getline($client, $content_length)))
       {
-        last if $result == 0;
+        last unless $result;
+	$body = $result;
       }
 
       ctcs_log(LOG_DEBUG, "AFTER: Length of body is %d", length($body));
@@ -1171,31 +1170,50 @@ sub handle_register_torrent
 
 sub ctcs_getline
 {
-  my $client   = shift;
-  my $fragment = $clients{$client}->{partial_read} || '';
-  my $offset   = length($fragment);
-  my $newline  = qr/\n$/o;
-  for ( ; $offset < 1024; $offset++)
+  my $client  = shift;
+  my $limit   = shift;
+  my $partial = $clients{$client}->{partial_read} || '';
+  my $offset  = length($partial);
+  my $line    = 0;
+
+  if ($limit)
   {
-    my $result = sysread($client, $fragment, 1, $offset);
-    if (!defined($result))
+    until (length($partial) >= $limit)
     {
-      if ($! == EAGAIN)
-      {
-        $clients{$client}->{partial_read} = $fragment;
-      }
-      else
-      {
-        delete($clients{$client}->{partial_read});
-      }
-      return undef;
+      my $result = sysread($client, $partial, $limit - $offset, $offset);
+      return undef if !defined($result) || $result == 0;
     }
-    last if $fragment =~ $newline || $result == 0;
+
+    if ($offset == $limit)
+    {
+      delete $clients{$client}->{partial_read};
+    }
+    else
+    {
+      $line    = substr($partial, 0, $limit);
+      $clients{$client}->{partial_read} = substr($partial, $limit, $offset - $limit);
+    }
+    #printf "'%s'\n", $line;
+    return $line;
   }
 
-  delete($clients{$client}->{partial_read});
-  $fragment =~ s/(^|\S)\s*$/$1/;
-  return $fragment;
+  until ($partial =~ /\n/)
+  {
+    my $read = sysread($client, $partial, 256, $offset);
+    return $read if !defined($read) || $read == 0;
+    $offset += $read;
+  }
+
+  if ($partial =~ /\n/g)
+  {
+    $line = substr($partial, 0, pos($partial));
+    $partial = substr($partial, pos($partial));
+    $clients{$client}->{partial_read} = $partial;
+  }
+
+  $line =~ s/(^|\S)\s*$/$1/;
+  #printf "'%s'\n", $line;
+  return $line;
 }
 
 ###############################################################################
