@@ -71,7 +71,6 @@ use IO::Socket;
 use IO::Select;
 use IO::String;
 use Socket 'TCP_NODELAY';
-use Fcntl 'O_NONBLOCK';
 use Errno 'EAGAIN';
 use CGI qw(:standard);
 use Getopt::Long;
@@ -295,7 +294,10 @@ sub handle_read
 sub register_new_client
 {
   my $client = shift;
-  $client->sockopt(O_NONBLOCK | TCP_NODELAY, 1);
+
+  $client->sockopt(TCP_NODELAY, 1);
+  $client->blocking(0);
+
   ctcs_log(LOG_INFO,
            "connection from %s:%d",
            address_of($client),
