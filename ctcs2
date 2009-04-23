@@ -297,7 +297,7 @@ sub register_new_client
   my $client = shift;
   $client->sockopt(O_NONBLOCK | TCP_NODELAY, 1);
   ctcs_log(LOG_INFO,
-           "connection from %s on port %d",
+           "connection from %s:%d",
            address_of($client),
            $client->peerport());
   $clients{$client} = {};
@@ -313,6 +313,7 @@ sub deregister_client
 {
   my $client   = shift;
   my $hostname = address_of($client);
+  my $port     = $client->peerport();
   if (scalar @{$clients{$client}->{messages}})
   {
     ctcs_log(LOG_WARNING, "CLIENT BEING DELETED WITH A NON-EMPTY MESSAGE QUEUE");
@@ -323,7 +324,7 @@ sub deregister_client
   delete $clients{$client};
   ctcs_log(LOG_INFO,
            "connection closed%s",
-           (defined($hostname)) ? " from $hostname" : "");
+           (defined($hostname)) ? " from $hostname:$port" : "");
   $readers->remove($client) while $readers->exists($client);
   $writers->remove($client) while $writers->exists($client);
   $client->shutdown(2);
@@ -394,7 +395,7 @@ sub handle_request
 sub reader_function_for
 {
   my ($socket) = @_;
-  my $function = $clients{$socket}->{reader};
+  my $function = $clients{$socket}->{request_reader};
   if (!$function)
   {
     my @header;
@@ -412,7 +413,7 @@ sub reader_function_for
 
     $initialise->();
 
-    $function = $clients{$socket}->{reader} = sub {
+    $function = $clients{$socket}->{request_reader} = sub {
       my $client = $_[0];
       my ($line, $result);
       while (!$header_read && defined($line = ctcs_getline($client)))
@@ -1170,50 +1171,79 @@ sub handle_register_torrent
 
 sub ctcs_getline
 {
-  my $client  = shift;
-  my $limit   = shift;
-  my $partial = $clients{$client}->{partial_read} || '';
-  my $offset  = length($partial);
-  my $line    = 0;
+  my ($socket, $limit) = @_;
+  my $reader = $clients{$socket}->{line_reader};
 
-  if ($limit)
+  if(!$reader)
   {
-    until (length($partial) >= $limit)
-    {
-      my $result = sysread($client, $partial, $limit - $offset, $offset);
-      return undef if !defined($result) || $result == 0;
-    }
+    my ($buffer, $buffer_length) = ('', 0);
 
-    if ($offset == $limit)
-    {
-      delete $clients{$client}->{partial_read};
-    }
-    else
-    {
-      $line    = substr($partial, 0, $limit);
-      $clients{$client}->{partial_read} = substr($partial, $limit, $offset - $limit);
-    }
-    #printf "'%s'\n", $line;
-    return $line;
+    ###########################################################################
+    # Define a line reader routine that's for use only by this socket.  This
+    # captures the state of the buffer without allowing it to infect other
+    # parts of the system.
+    #########################################################################
+
+    $reader = $clients{$socket}->{line_reader} = sub {
+
+      my $client          = shift; # Mandatory
+      my $bytes_requested = shift; # Optional
+
+      #########################################################################
+      # Figure out how much has to be retrieved from sysread, rather than using
+      # the internal buffer.  In the case of reading lines, this could well be
+      # zero, if the buffered data already has a complete line in it.
+      #########################################################################
+
+      my $external_read_size =
+      (defined($bytes_requested) && $bytes_requested >= $buffer_length) ?
+      $buffer_length - $bytes_requested :
+      ($buffer               =~ /\n/) ? 0 :
+      1024;
+
+      #########################################################################
+      # Read from the exteral source, if required
+      #########################################################################
+
+      if ($external_read_size)
+      {
+        my $result = sysread($client, $buffer, $external_read_size, $buffer_length);
+        return undef if !defined($result) || $result == 0;
+        $buffer_length += $result;
+      }
+
+      #########################################################################
+      # $bytes_requested, if defined, indicates the minimum that the caller
+      # wanted: don't give back anything if the entire request can't be
+      # satisfied.
+      # Without $bytes_requested, the absence of a newline in the buffer means
+      # that a complete line can't be returned: return undef instead.
+      #########################################################################
+
+      return undef if defined($bytes_requested) && $bytes_requested < $buffer_length;
+      return undef unless defined($bytes_requested) || $buffer =~ /\n/g;
+
+      #########################################################################
+      # Ok, by now, $buffer has enough data in it, so extract the line/required
+      # number of bytes and adjust the internal buffer appropriately.
+      #########################################################################
+
+      my $snip_point   = $bytes_requested || pos($buffer);
+      my $line         = substr($buffer, 0, $snip_point);
+      $buffer          = substr($buffer, $snip_point);
+      $buffer_length  -= length($line);
+
+      #########################################################################
+      # Unless extracting a specific number of bytes, trim off any blank spaces
+      # at the end of the line
+      #########################################################################
+
+      $line =~ s/(^|\S)\s*$/$1/ unless defined($bytes_requested);
+      return $line;
+    };
   }
 
-  until ($partial =~ /\n/)
-  {
-    my $read = sysread($client, $partial, 256, $offset);
-    return $read if !defined($read) || $read == 0;
-    $offset += $read;
-  }
-
-  if ($partial =~ /\n/g)
-  {
-    $line = substr($partial, 0, pos($partial));
-    $partial = substr($partial, pos($partial));
-    $clients{$client}->{partial_read} = $partial;
-  }
-
-  $line =~ s/(^|\S)\s*$/$1/;
-  #printf "'%s'\n", $line;
-  return $line;
+  return $reader->($socket, $limit);
 }
 
 ###############################################################################
