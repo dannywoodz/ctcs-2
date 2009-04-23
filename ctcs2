@@ -404,11 +404,12 @@ sub reader_function_for
     my $body;
     my $line_reader = line_reader_function();
 
-    my $initialise    = sub {
-      @header         = ();
+    my $initialise = sub {
+      ctcs_log(LOG_DEBUG, "Initialising reader function");
+      @header = ();
       $header_read    = 0;
       $content_length = 0;
-      $body           = '';
+      $body = '';
     };
 
     $initialise->();
@@ -416,16 +417,18 @@ sub reader_function_for
     $function = $clients{$socket}->{reader} = sub {
       my $client = $_[0];
       my ($line, $result);
-
       while (!$header_read && defined($line = $line_reader->($client)))
       {
-        return $line if $line =~ /^(?:POST|GET)/ && scalar @header == 0;
+        return $line if $line !~ /^(?:POST|GET)/ && scalar @header == 0;
         $content_length = $1 if $line =~ /^Content-Length: (\d+)/;
+        ctcs_log(LOG_DEBUG, "Header line: '%s'", $line);
         push(@header, $line);
         $header_read = 1 if $line eq '';
       }
-
       return undef unless $header_read;
+
+      ctcs_log(LOG_DEBUG, "Content-Length: %s", $content_length);
+      ctcs_log(LOG_DEBUG, "BEFORE: Length of body is %d", length($body));
 
       while ($content_length > 0 &&
              length($body) < $content_length &&
@@ -435,8 +438,13 @@ sub reader_function_for
 	$body = $result;
       }
 
-      return undef if !defined($result) && length($body) < $content_length;
+      ctcs_log(LOG_DEBUG, "AFTER: Length of body is %d", length($body));
+      ctcs_log(LOG_DEBUG, "Body is '%s'", $body);
+
+      return undef if (!defined($result) && length($body) < $content_length);
       return undef unless length($body) == $content_length;
+
+      ctcs_log(LOG_DEBUG, "Body: %s", $body);
 
       push(@header, $body) if $body;
       my $response = join("\n", @header);
@@ -1137,6 +1145,7 @@ sub handle_register_torrent
 # Defines a function that reads lines from an I/O handle given to it.  Can,
 # if given a second 'limit' parameter, instead be used to read a specific
 # number of bytes.
+#
 # * If the line is successfully read, this method returns the completed line.
 # * If a full line cannot be read (but *something* is) this method returns
 #   undef, and $! is EAGAIN.  The partially read string is stored for
@@ -1148,12 +1157,6 @@ sub handle_register_torrent
 sub line_reader_function
 {
   my ($buffer, $buffer_length) = ('', 0);
-
-  #############################################################################
-  # Define a line reader routine that's for use only by this socket.  This
-  # captures the state of the buffer without allowing it to infect other
-  # parts of the system.
-  #############################################################################
 
   return sub {
 
@@ -1167,16 +1170,16 @@ sub line_reader_function
     ###########################################################################
 
     my $external_read_size =
-    (defined($bytes_requested) && $bytes_requested >= $buffer_length) ?
-    $buffer_length - $bytes_requested :
-    ($buffer               =~ /\n/) ? 0 :
-    1024;
+      (defined($bytes_requested) && $bytes_requested >= $buffer_length) ?
+      $bytes_requested - $buffer_length :
+      ($buffer               =~ /\n/) ? 0 :
+      1024;
 
     ###########################################################################
     # Read from the exteral source, if required
     ###########################################################################
 
-    if ($external_read_size)
+    if ($external_read_size > 0)
     {
       my $result = sysread($client, $buffer, $external_read_size, $buffer_length);
       return undef if !defined($result) || $result == 0;
@@ -1199,10 +1202,10 @@ sub line_reader_function
     # number of bytes and adjust the internal buffer appropriately.
     ###########################################################################
 
-    my $snip_point    = $bytes_requested || pos($buffer);
-    my $line          = substr($buffer, 0, $snip_point);
-    $buffer           = substr($buffer, $snip_point);
-    $buffer_length   -= length($line);
+    my $snip_point   = $bytes_requested || pos($buffer);
+    my $line         = substr($buffer, 0, $snip_point);
+    $buffer          = $snip_point < $buffer_length ? substr($buffer, $snip_point) : '';
+    $buffer_length  -= length($line);
 
     ###########################################################################
     # Unless extracting a specific number of bytes, trim off any blank spaces
