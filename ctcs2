@@ -71,7 +71,6 @@ use IO::Socket;
 use IO::Select;
 use IO::String;
 use Socket 'TCP_NODELAY';
-use Fcntl 'O_NONBLOCK';
 use Errno 'EAGAIN';
 use CGI qw(:standard);
 use Getopt::Long;
@@ -295,9 +294,12 @@ sub handle_read
 sub register_new_client
 {
   my $client = shift;
-  $client->sockopt(O_NONBLOCK | TCP_NODELAY, 1);
+
+  $client->sockopt(TCP_NODELAY, 1);
+  $client->blocking(0);
+
   ctcs_log(LOG_INFO,
-           "connection from %s on port %d",
+           "connection from %s:%d",
            address_of($client),
            $client->peerport());
   $clients{$client} = {};
@@ -313,6 +315,7 @@ sub deregister_client
 {
   my $client   = shift;
   my $hostname = address_of($client);
+  my $port     = $client->peerport();
   if (scalar @{$clients{$client}->{messages}})
   {
     ctcs_log(LOG_WARNING, "CLIENT BEING DELETED WITH A NON-EMPTY MESSAGE QUEUE");
@@ -323,7 +326,7 @@ sub deregister_client
   delete $clients{$client};
   ctcs_log(LOG_INFO,
            "connection closed%s",
-           (defined($hostname)) ? " from $hostname" : "");
+           (defined($hostname)) ? " from $hostname:$port" : "");
   $readers->remove($client) while $readers->exists($client);
   $writers->remove($client) while $writers->exists($client);
   $client->shutdown(2);
@@ -401,6 +404,7 @@ sub reader_function_for
     my $header_read;
     my $content_length;
     my $body;
+    my $line_reader = line_reader_function();
 
     my $initialise = sub {
       ctcs_log(LOG_DEBUG, "Initialising reader function");
@@ -415,12 +419,9 @@ sub reader_function_for
     $function = $clients{$socket}->{reader} = sub {
       my $client = $_[0];
       my ($line, $result);
-      while (!$header_read && defined($line = ctcs_getline($client)))
+      while (!$header_read && defined($line = $line_reader->($client)))
       {
-        if (scalar @header == 0)
-        {
-          return $line unless $line =~ /^(?:POST|GET)/;
-        }
+        return $line if $line !~ /^(?:POST|GET)/ && scalar @header == 0;
         $content_length = $1 if $line =~ /^Content-Length: (\d+)/;
         ctcs_log(LOG_DEBUG, "Header line: '%s'", $line);
         push(@header, $line);
@@ -433,7 +434,7 @@ sub reader_function_for
 
       while ($content_length > 0 &&
              length($body) < $content_length &&
-	     defined($result = ctcs_getline($client, $content_length)))
+	     defined($result = $line_reader->($client, $content_length)))
       {
         last unless $result;
 	$body = $result;
@@ -442,22 +443,7 @@ sub reader_function_for
       ctcs_log(LOG_DEBUG, "AFTER: Length of body is %d", length($body));
       ctcs_log(LOG_DEBUG, "Body is '%s'", $body);
 
-      if (!defined($result) && length($body) < $content_length)
-      {
-        if ($! == EAGAIN)
-        {
-          ctcs_log(LOG_DEBUG, "Partial read; returning to queue");
-          return undef;
-        }
-        else
-        {
-          ctcs_log(LOG_DEBUG, "Read result: %s; EAGAIN is%s set",
-                   (defined($result)) ? $result : "undefined",
-                   $! == EAGAIN ? "" : " NOT");
-          return undef;
-        }
-      }
-
+      return undef if (!defined($result) && length($body) < $content_length);
       return undef unless length($body) == $content_length;
 
       ctcs_log(LOG_DEBUG, "Body: %s", $body);
@@ -1158,8 +1144,10 @@ sub handle_register_torrent
 }
 
 ###############################################################################
-# Reads a single line of text from the given socket.  A line is terminated
-# by a newline character ('\n').
+# Defines a function that reads lines from an I/O handle given to it.  Can,
+# if given a second 'limit' parameter, instead be used to read a specific
+# number of bytes.
+#
 # * If the line is successfully read, this method returns the completed line.
 # * If a full line cannot be read (but *something* is) this method returns
 #   undef, and $! is EAGAIN.  The partially read string is stored for
@@ -1168,52 +1156,67 @@ sub handle_register_torrent
 #   method returns undef: check $! to determine what has happened.
 ###############################################################################
 
-sub ctcs_getline
+sub line_reader_function
 {
-  my $client  = shift;
-  my $limit   = shift;
-  my $partial = $clients{$client}->{partial_read} || '';
-  my $offset  = length($partial);
-  my $line    = 0;
+  my ($buffer, $buffer_length) = ('', 0);
 
-  if ($limit)
-  {
-    until (length($partial) >= $limit)
+  return sub {
+
+    my $client          = shift; # Mandatory
+    my $bytes_requested = shift; # Optional
+
+    ###########################################################################
+    # Figure out how much has to be retrieved from sysread, rather than using
+    # the internal buffer.  In the case of reading lines, this could well be
+    # zero, if the buffered data already has a complete line in it.
+    ###########################################################################
+
+    my $external_read_size =
+      (defined($bytes_requested) && $bytes_requested >= $buffer_length) ?
+      $bytes_requested - $buffer_length :
+      ($buffer               =~ /\n/) ? 0 :
+      1024;
+
+    ###########################################################################
+    # Read from the exteral source, if required
+    ###########################################################################
+
+    if ($external_read_size > 0)
     {
-      my $result = sysread($client, $partial, $limit - $offset, $offset);
+      my $result = sysread($client, $buffer, $external_read_size, $buffer_length);
       return undef if !defined($result) || $result == 0;
+      $buffer_length += $result;
     }
 
-    if ($offset == $limit)
-    {
-      delete $clients{$client}->{partial_read};
-    }
-    else
-    {
-      $line    = substr($partial, 0, $limit);
-      $clients{$client}->{partial_read} = substr($partial, $limit, $offset - $limit);
-    }
-    #printf "'%s'\n", $line;
+    ###########################################################################
+    # $bytes_requested, if defined, indicates the minimum that the caller
+    # wanted: don't give back anything if the entire request can't be
+    # satisfied.
+    # Without $bytes_requested, the absence of a newline in the buffer means
+    # that a complete line can't be returned: return undef instead.
+    ###########################################################################
+
+    return undef if defined($bytes_requested) && $bytes_requested < $buffer_length;
+    return undef unless defined($bytes_requested) || $buffer =~ /\n/g;
+
+    ###########################################################################
+    # Ok, by now, $buffer has enough data in it, so extract the line/required
+    # number of bytes and adjust the internal buffer appropriately.
+    ###########################################################################
+
+    my $snip_point   = $bytes_requested || pos($buffer);
+    my $line         = substr($buffer, 0, $snip_point);
+    $buffer          = $snip_point < $buffer_length ? substr($buffer, $snip_point) : '';
+    $buffer_length  -= length($line);
+
+    ###########################################################################
+    # Unless extracting a specific number of bytes, trim off any blank spaces
+    # at the end of the line
+    ###########################################################################
+
+    $line =~ s/(^|\S)\s*$/$1/ unless defined($bytes_requested);
     return $line;
-  }
-
-  until ($partial =~ /\n/)
-  {
-    my $read = sysread($client, $partial, 256, $offset);
-    return $read if !defined($read) || $read == 0;
-    $offset += $read;
-  }
-
-  if ($partial =~ /\n/g)
-  {
-    $line = substr($partial, 0, pos($partial));
-    $partial = substr($partial, pos($partial));
-    $clients{$client}->{partial_read} = $partial;
-  }
-
-  $line =~ s/(^|\S)\s*$/$1/;
-  #printf "'%s'\n", $line;
-  return $line;
+  };
 }
 
 ###############################################################################
@@ -1892,8 +1895,3 @@ usage was monitored over time, and slices adjusted on the fly (DIFFICULT)
 
 *) Config variables are typed: make use of this type information to use the
 appropriate HTML control, rather than the current textfield (checkboxes for booleans, for example) (SIMPLE)
-
-*) ctcs_getline is horribly inefficient, invoking sysread for each character.
-Imrove this to use batch reads, possibly caching data in the %clients hash for
-that client.  Whatever goes on, it has to play nice with the handle_form_submission
-code for reading specific amounts (i.e. Content-Length) of data.
