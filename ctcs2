@@ -212,6 +212,7 @@ $ctcs{port}                 = $port;
 $ctcs{log_timestamps}       = !$suppress_log_timestamps;
 $ctcs{log_level}            = LOG_INFO;
 $ctcs{log_file_handle}      = \*STDOUT;
+$ctcs{form_encoding}        = 'application/x-www-form-urlencoded';
 
 ctcs_log(LOG_INFO, "CTCS Server started on port $port");
 
@@ -804,7 +805,7 @@ sub index_page
     my $submit_button = submit({name=>'submit-bandwidth-changes',
                                 value=>'Apply Changes'});
 
-    print start_form(-method => 'post', -action => '/', -enctype => $CGI::URL_ENCODED);
+    printf '<form method="post" action="/" enctype="%s">', $ctcs{form_encoding};
     print div({id => 'global-bandwidth-limits'},
               table(
                     Tr(th('Current Download Bandwidth:'), td({class => 'numeric', id => 'download-bandwidth'}, $current_download_field . '/s')),
@@ -866,7 +867,7 @@ sub index_page
                td({class => 'numeric'}, $uploaded),
                td({class => 'numeric'}, $size),
                td({class => "numeric $ratio_class"}, $ratio),
-               td(start_form(-name => $torrent_id, -action => '/status-action', -method => 'post', -enctype => $CGI::URL_ENCODED),
+               td(sprintf('<form name="$torrent_id" method="post" action="/status-action" enctype="%s">', $ctcs{form_encoding}),
                   Select({name => 'action'},
                          option({value => $pause_unpause}, $pause_unpause),
                          option({value => 'Update'}, 'Update'),
@@ -918,9 +919,7 @@ sub advanced_limits_page
              sprintf("Global Upload Limit: %s/s; Global Download Limit: %s/s",
                      human_readable($ctcs{upload_limit}),
                      human_readable($ctcs{download_limit})));
-    print start_form(-action => '/set-advanced-limits',
-                     -method => 'post',
-                     -enctype => $CGI::URL_ENCODED);
+    printf '<form action="/set-advanced-limits" method="post" enctype="%s">', $ctcs{form_encoding};
     print CGI::start_table({id => 'torrents'});
     print Tr(th('Torrent'), th('Upload Limit (KB/s)'), th('Download Limit (KB/s)'), th('Auto-Manage'));
 
@@ -986,9 +985,7 @@ sub ctcs_config_table
   my %config         = %{$torrent_info->{config}};
   my @config_options = sort keys %config;
   return with_output_to_string {
-    print start_form(-method  => 'post',
-                     -action  => '/set-config',
-                     -enctype => $CGI::URL_ENCODED);
+    print '<form method="post" action="/set-config" enctype="%s">', $ctcs{form_encoding};
     print CGI::start_table({id => 'config'});
     print Tr(th('Option'), th({colspan => 2}, 'Value'));
 
