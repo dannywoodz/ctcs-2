@@ -395,73 +395,48 @@ sub handle_request
 sub reader_function_for
 {
   my ($socket) = @_;
-  my $function = $clients{$socket}->{request_reader};
+  my $function = $clients{$socket}->{reader};
   if (!$function)
   {
     my @header;
     my $header_read;
     my $content_length;
     my $body;
+    my $line_reader = line_reader_function();
 
-    my $initialise = sub {
-      ctcs_log(LOG_DEBUG, "Initialising reader function");
-      @header = ();
+    my $initialise    = sub {
+      @header         = ();
       $header_read    = 0;
       $content_length = 0;
-      $body = '';
+      $body           = '';
     };
 
     $initialise->();
 
-    $function = $clients{$socket}->{request_reader} = sub {
+    $function = $clients{$socket}->{reader} = sub {
       my $client = $_[0];
       my ($line, $result);
-      while (!$header_read && defined($line = ctcs_getline($client)))
+
+      while (!$header_read && defined($line = $line_reader->($client)))
       {
-        if (scalar @header == 0)
-        {
-          return $line unless $line =~ /^(?:POST|GET)/;
-        }
+        return $line if $line =~ /^(?:POST|GET)/ && scalar @header == 0;
         $content_length = $1 if $line =~ /^Content-Length: (\d+)/;
-        ctcs_log(LOG_DEBUG, "Header line: '%s'", $line);
         push(@header, $line);
         $header_read = 1 if $line eq '';
       }
-      return undef unless $header_read;
 
-      ctcs_log(LOG_DEBUG, "Content-Length: %s", $content_length);
-      ctcs_log(LOG_DEBUG, "BEFORE: Length of body is %d", length($body));
+      return undef unless $header_read;
 
       while ($content_length > 0 &&
              length($body) < $content_length &&
-	     defined($result = ctcs_getline($client, $content_length)))
+	     defined($result = $line_reader->($client, $content_length)))
       {
         last unless $result;
 	$body = $result;
       }
 
-      ctcs_log(LOG_DEBUG, "AFTER: Length of body is %d", length($body));
-      ctcs_log(LOG_DEBUG, "Body is '%s'", $body);
-
-      if (!defined($result) && length($body) < $content_length)
-      {
-        if ($! == EAGAIN)
-        {
-          ctcs_log(LOG_DEBUG, "Partial read; returning to queue");
-          return undef;
-        }
-        else
-        {
-          ctcs_log(LOG_DEBUG, "Read result: %s; EAGAIN is%s set",
-                   (defined($result)) ? $result : "undefined",
-                   $! == EAGAIN ? "" : " NOT");
-          return undef;
-        }
-      }
-
+      return undef if !defined($result) && length($body) < $content_length;
       return undef unless length($body) == $content_length;
-
-      ctcs_log(LOG_DEBUG, "Body: %s", $body);
 
       push(@header, $body) if $body;
       my $response = join("\n", @header);
@@ -1159,8 +1134,9 @@ sub handle_register_torrent
 }
 
 ###############################################################################
-# Reads a single line of text from the given socket.  A line is terminated
-# by a newline character ('\n').
+# Defines a function that reads lines from an I/O handle given to it.  Can,
+# if given a second 'limit' parameter, instead be used to read a specific
+# number of bytes.
 # * If the line is successfully read, this method returns the completed line.
 # * If a full line cannot be read (but *something* is) this method returns
 #   undef, and $! is EAGAIN.  The partially read string is stored for
@@ -1169,81 +1145,73 @@ sub handle_register_torrent
 #   method returns undef: check $! to determine what has happened.
 ###############################################################################
 
-sub ctcs_getline
+sub line_reader_function
 {
-  my ($socket, $limit) = @_;
-  my $reader = $clients{$socket}->{line_reader};
+  my ($buffer, $buffer_length) = ('', 0);
 
-  if(!$reader)
-  {
-    my ($buffer, $buffer_length) = ('', 0);
+  #############################################################################
+  # Define a line reader routine that's for use only by this socket.  This
+  # captures the state of the buffer without allowing it to infect other
+  # parts of the system.
+  #############################################################################
+
+  return sub {
+
+    my $client          = shift; # Mandatory
+    my $bytes_requested = shift; # Optional
 
     ###########################################################################
-    # Define a line reader routine that's for use only by this socket.  This
-    # captures the state of the buffer without allowing it to infect other
-    # parts of the system.
-    #########################################################################
+    # Figure out how much has to be retrieved from sysread, rather than using
+    # the internal buffer.  In the case of reading lines, this could well be
+    # zero, if the buffered data already has a complete line in it.
+    ###########################################################################
 
-    $reader = $clients{$socket}->{line_reader} = sub {
+    my $external_read_size =
+    (defined($bytes_requested) && $bytes_requested >= $buffer_length) ?
+    $buffer_length - $bytes_requested :
+    ($buffer               =~ /\n/) ? 0 :
+    1024;
 
-      my $client          = shift; # Mandatory
-      my $bytes_requested = shift; # Optional
+    ###########################################################################
+    # Read from the exteral source, if required
+    ###########################################################################
 
-      #########################################################################
-      # Figure out how much has to be retrieved from sysread, rather than using
-      # the internal buffer.  In the case of reading lines, this could well be
-      # zero, if the buffered data already has a complete line in it.
-      #########################################################################
+    if ($external_read_size)
+    {
+      my $result = sysread($client, $buffer, $external_read_size, $buffer_length);
+      return undef if !defined($result) || $result == 0;
+      $buffer_length += $result;
+    }
 
-      my $external_read_size =
-      (defined($bytes_requested) && $bytes_requested >= $buffer_length) ?
-      $buffer_length - $bytes_requested :
-      ($buffer               =~ /\n/) ? 0 :
-      1024;
+    ###########################################################################
+    # $bytes_requested, if defined, indicates the minimum that the caller
+    # wanted: don't give back anything if the entire request can't be
+    # satisfied.
+    # Without $bytes_requested, the absence of a newline in the buffer means
+    # that a complete line can't be returned: return undef instead.
+    ###########################################################################
 
-      #########################################################################
-      # Read from the exteral source, if required
-      #########################################################################
+    return undef if defined($bytes_requested) && $bytes_requested < $buffer_length;
+    return undef unless defined($bytes_requested) || $buffer =~ /\n/g;
 
-      if ($external_read_size)
-      {
-        my $result = sysread($client, $buffer, $external_read_size, $buffer_length);
-        return undef if !defined($result) || $result == 0;
-        $buffer_length += $result;
-      }
+    ###########################################################################
+    # Ok, by now, $buffer has enough data in it, so extract the line/required
+    # number of bytes and adjust the internal buffer appropriately.
+    ###########################################################################
 
-      #########################################################################
-      # $bytes_requested, if defined, indicates the minimum that the caller
-      # wanted: don't give back anything if the entire request can't be
-      # satisfied.
-      # Without $bytes_requested, the absence of a newline in the buffer means
-      # that a complete line can't be returned: return undef instead.
-      #########################################################################
+    my $snip_point    = $bytes_requested || pos($buffer);
+    my $line          = substr($buffer, 0, $snip_point);
+    $buffer           = substr($buffer, $snip_point);
+    $buffer_length   -= length($line);
 
-      return undef if defined($bytes_requested) && $bytes_requested < $buffer_length;
-      return undef unless defined($bytes_requested) || $buffer =~ /\n/g;
+    ###########################################################################
+    # Unless extracting a specific number of bytes, trim off any blank spaces
+    # at the end of the line
+    ###########################################################################
 
-      #########################################################################
-      # Ok, by now, $buffer has enough data in it, so extract the line/required
-      # number of bytes and adjust the internal buffer appropriately.
-      #########################################################################
-
-      my $snip_point   = $bytes_requested || pos($buffer);
-      my $line         = substr($buffer, 0, $snip_point);
-      $buffer          = substr($buffer, $snip_point);
-      $buffer_length  -= length($line);
-
-      #########################################################################
-      # Unless extracting a specific number of bytes, trim off any blank spaces
-      # at the end of the line
-      #########################################################################
-
-      $line =~ s/(^|\S)\s*$/$1/ unless defined($bytes_requested);
-      return $line;
-    };
-  }
-
-  return $reader->($socket, $limit);
+    $line =~ s/(^|\S)\s*$/$1/ unless defined($bytes_requested);
+    return $line;
+  };
 }
 
 ###############################################################################
@@ -1922,8 +1890,3 @@ usage was monitored over time, and slices adjusted on the fly (DIFFICULT)
 
 *) Config variables are typed: make use of this type information to use the
 appropriate HTML control, rather than the current textfield (checkboxes for booleans, for example) (SIMPLE)
-
-*) ctcs_getline is horribly inefficient, invoking sysread for each character.
-Imrove this to use batch reads, possibly caching data in the %clients hash for
-that client.  Whatever goes on, it has to play nice with the handle_form_submission
-code for reading specific amounts (i.e. Content-Length) of data.
