@@ -401,31 +401,34 @@ sub reader_function_for
   my $function = $clients{$socket}->{reader};
   if (!$function)
   {
-    my @header;
+    my $header = IO::String->new();
     my $header_read;
     my $content_length;
     my $body;
     my $line_reader = line_reader_function();
+    my $do_initialise = 1;
 
     my $initialise = sub {
       ctcs_log(LOG_DEBUG, "Initialising reader function");
-      @header = ();
+      $header->pos(0);
       $header_read    = 0;
       $content_length = 0;
       $body = '';
+      $do_initialise = 0;
     };
-
-    $initialise->();
 
     $function = $clients{$socket}->{reader} = sub {
       my $client = $_[0];
       my ($line, $result);
+
+      $initialise->() if $do_initialise;
+
       while (!$header_read && defined($line = $line_reader->($client)))
       {
-        return $line if $line !~ /^(?:POST|GET)/ && scalar @header == 0;
+        return $line if $line !~ /^(?:POST|GET)/ && $header->pos() == 0;
         $content_length = $1 if $line =~ /^Content-Length: (\d+)/;
         ctcs_log(LOG_DEBUG, "Header line: '%s'", $line);
-        push(@header, $line);
+        print $header $line, "\n";
         $header_read = 1 if $line eq '';
       }
       return undef unless $header_read;
@@ -449,10 +452,11 @@ sub reader_function_for
 
       ctcs_log(LOG_DEBUG, "Body: %s", $body);
 
-      push(@header, $body) if $body;
-      my $response = join("\n", @header);
-      $initialise->();
-      return $response;
+      print $header $body if $body;
+
+      $do_initialise = 1;
+
+      return ${$header->string_ref()};
     }
   }
   return $function;
@@ -581,7 +585,7 @@ sub function_to_handle_request
              peer_count_for($client),
              torrent_handled_by($client)->{name});
     $clients{$client}->{torrent}->{peers} = $clients{$client}->{torrent}->{incoming_peers};
-    $clients{$client}->{torrent}->{incoming_peers} = [];
+    delete $clients{$client}->{torrent}->{incoming_peers};
     $clients{$client}->{torrent}->{last_peers_update} = time();
   }
   elsif (/^CTSTATUS\s+(.*)/)
@@ -1474,6 +1478,8 @@ sub torrent_update_config
 
 sub torrent_update_peers
 {
+  my ($client) = @_;
+  return if exists(torrent_handled_by($client)->{incoming_peers});
   torrent_update_only_after_minimum_time(shift,
                                          'last_peers_update',
                                          30,
@@ -1625,7 +1631,7 @@ sub torrent_add_peer
                              \s+
                              (\d+)       # pieces
                            /x) {
-    push(@{$torrent_info->{incoming_peers}},
+    push(@{$torrent_info->{incoming_peers} ||= []},
          {id            => $1,
           address       => $2,
           remote_flags  => $3,
