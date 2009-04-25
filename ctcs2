@@ -196,7 +196,6 @@ my $server = IO::Socket::INET->new(LocalPort => $port,
 
 my $readers  = IO::Select->new();
 my $writers  = IO::Select->new();
-my $errors   = IO::Select->new();
 
 $readers->add($server);
 
@@ -222,11 +221,10 @@ ctcs_log(LOG_INFO, "CTCS Server started on port $port");
 
 for (my $last_update = time(); defined($server); )
 {
-  my ($readable, $writable, $errors) =
-  IO::Select::select($readers, $writers, $errors, 1);
+  my ($readable, $writable) =
+  IO::Select::select($readers, $writers, undef, 1);
   handle_write($_) for @$writable;
   handle_read($_)  for @$readable;
-  handle_error($_) for @$errors;
 
   if (time() != $last_update)
   {
@@ -287,7 +285,7 @@ sub handle_read
 }
 
 ###############################################################################
-# A new client gets a slot in the %messages hash, with an empty queue.  They
+# A new client gets a slot in the %clients hash, with an empty queue.  They
 # are then added to the readers list so that a future select will reap their
 # request.
 ###############################################################################
