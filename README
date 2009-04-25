@@ -6,11 +6,11 @@ PREREQUISITES
 
 ctcs2 is written in Perl: you'll need a Perl interpreter on your system to run
 it.  It has been developed against Perl 5.8 on FreeBSD, Linux and Mac OS X and
-makes use of only standard modules.  You might have success running it on
-Windows, either with a native Perl like ActivePerl
-(http://www.activestate.com/activeperl/) or using Cygwin
-(http://www.cygwin.com/), but I haven't tried  that.
+makes use of only standard modules.
 
+There's nothing that stops it from working on Windows using Cygwin or
+ActivePerl, but I haven't tested either except in the most superficial
+capacity.
 
 GETTING STARTED
 ---------------
