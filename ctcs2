@@ -788,6 +788,43 @@ sub page_content
 }
 
 ###############################################################################
+# Given a number of seconds, returns a string of format: H:MM:SS
+###############################################################################
+
+sub human_readable_time
+{
+ my $seconds = shift;
+ my $minutes = ($seconds/60) % 60;
+ my $hours   = ($seconds/3600);
+ $seconds    =  $seconds % 60;
+
+ return sprintf("%d:%02d:%02d", $hours, $minutes, $seconds);
+}
+
+###############################################################################
+# Calculate the time remaining for a given download rate and chunk data.
+###############################################################################
+
+sub calculate_time_remainig
+{
+ my $downloaded_chunks = shift;
+ my $total_chunks      = shift;
+ my $chunk_size        = shift;
+ my $download_rate     = shift;
+
+ if ( $downloaded_chunks && $total_chunks && $chunk_size && $download_rate &&
+      $downloaded_chunks != $total_chunks &&
+      $download_rate > 0 )
+ {
+  return human_readable_time((($total_chunks - $downloaded_chunks) * $chunk_size) / $download_rate);
+ }
+ else
+ {
+  return "-";
+ }
+}
+
+###############################################################################
 # The front page
 ###############################################################################
 
@@ -823,7 +860,7 @@ sub index_page
     print end_form();
 
     print CGI::start_table({id => 'torrents'});
-    print Tr(th('Name'), th('% Complete'), th('Download Rate'), th('Upload Rate'),
+    print Tr(th('Name'), th('% Complete'), th('Time Remaining'), th('Download Rate'), th('Upload Rate'),
              th('Seeds'), th('Leeches'), th('Downloaded'), th('Uploaded'),
              th('Size'), th('Ratio'), th('Action'));
 
@@ -846,6 +883,21 @@ sub index_page
       my $uploaded         = human_readable($torrent->{uploaded}, '0.2f');
       my $size             = human_readable($torrent->{size}, 'd', '0.2f');
       my $percent_complete = sprintf('%d%%', $torrent->{percent_complete});
+
+      my $smoothed_dl_rate= 0;
+      my @dl_hist= @{$torrent->{download_rate_history}};
+      my $dl_count= $#dl_hist;
+
+      for(my $i= 0; $i < $dl_count; $i++)
+      {
+        $smoothed_dl_rate += $dl_hist[$i];
+      }
+
+      $smoothed_dl_rate= $smoothed_dl_rate/$dl_count if $smoothed_dl_rate > 0;
+
+      ctcs_log(LOG_WARNING, "Smoothed download rate: $smoothed_dl_rate");
+
+      my $time_to_finish   = calculate_time_remainig($torrent->{downloaded_chunks}, $torrent->{total_chunks}, $torrent->{piece_size}, $smoothed_dl_rate);
       my $raw_ratio        = ($torrent->{uploaded} == 0) ? 0 :
       ($torrent->{downloaded} == 0) ? 'Inf.' :
       $torrent->{uploaded} / $torrent->{downloaded};
@@ -863,6 +915,7 @@ sub index_page
       print Tr({class => $row_class},
                td($torrent_link),
                td({class => 'numeric'}, $percent_complete),
+               td({class => 'numeric'}, $time_to_finish),
                td({class => 'numeric'}, $download_rate, '/s'),
                td({class => 'numeric'}, $upload_rate, '/s'),
                td({class => 'numeric'}, $active_seeders, '/', $total_seeders),
@@ -1100,6 +1153,10 @@ sub record_bandwidth
   my $info = torrent_handled_by($client);
   $info->{upload_rate}   = $ulrate;
   $info->{download_rate} = $dlrate;
+  my @dl_hist= @{$info->{download_rate_history}};
+  push(@dl_hist, $dlrate);
+  shift @dl_hist if $#dl_hist > 50;
+  @{$info->{download_rate_history}}= @dl_hist;
   my $total = exists($info->{total_chunks}) ? $info->{total_chunks} : 0;
   my $downloaded = exists($info->{downloaded_chunks}) ? $info->{downloaded_chunks} : 0;
   $info->{percent_complete} = $total == 0 ?
@@ -1117,29 +1174,30 @@ sub handle_register_torrent
   my ($socket, $torrent_id, $start_time, $current_time, $torrent_name) = @_;
 
   my $info = {};
-  $info->{name}               = $torrent_name;
-  $info->{id}                 = $torrent_id;
-  $info->{config}             = { pause => {value => 0}};
-  $info->{percent_complete}   = 0;
-  $info->{files}              = [];
-  $info->{peers}              = [];
-  $info->{active_seeders}     = 0;
-  $info->{total_seeders}      = 0;
-  $info->{active_leechers}    = 0;
-  $info->{total_leechers}     = 0;
-  $info->{total_connections}  = 0;
-  $info->{downloaded_chunks}  = 0;
-  $info->{total_chunks}       = 0;
-  $info->{available_chunks}   = 0;
-  $info->{download_rate}      = 0;
-  $info->{upload_rate}        = 0;
-  $info->{downloaded}         = 0;
-  $info->{uploaded}           = 0;
-  $info->{download_limit}     = 0;
-  $info->{upload_limit}       = 0;
-  $info->{cache_used}         = 0;
-  $info->{last_detail_update} = 0;
-  $info->{size}               = 0;
+  $info->{name}                  = $torrent_name;
+  $info->{id}                    = $torrent_id;
+  $info->{config}                = { pause => {value => 0}};
+  $info->{percent_complete}      = 0;
+  $info->{files}                 = [];
+  $info->{peers}                 = [];
+  $info->{active_seeders}        = 0;
+  $info->{total_seeders}         = 0;
+  $info->{active_leechers}       = 0;
+  $info->{total_leechers}        = 0;
+  $info->{total_connections}     = 0;
+  $info->{downloaded_chunks}     = 0;
+  $info->{total_chunks}          = 0;
+  $info->{available_chunks}      = 0;
+  $info->{download_rate}         = 0;
+  $info->{download_rate_history} = [];
+  $info->{upload_rate}           = 0;
+  $info->{downloaded}            = 0;
+  $info->{uploaded}              = 0;
+  $info->{download_limit}        = 0;
+  $info->{upload_limit}          = 0;
+  $info->{cache_used}            = 0;
+  $info->{last_detail_update}    = 0;
+  $info->{size}                  = 0;
 
   $clients{$socket}->{torrent} = $info;
 }
