@@ -1153,7 +1153,7 @@ sub record_bandwidth
   $info->{download_rate} = $dlrate;
   my @dl_hist= @{$info->{download_rate_history}};
   push(@dl_hist, $dlrate);
-  shift @dl_hist if $#dl_hist > 50;
+  shift @dl_hist if $#dl_hist > 100;
   @{$info->{download_rate_history}}= @dl_hist;
   my $total = exists($info->{total_chunks}) ? $info->{total_chunks} : 0;
   my $downloaded = exists($info->{downloaded_chunks}) ? $info->{downloaded_chunks} : 0;
