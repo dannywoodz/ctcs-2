@@ -677,7 +677,11 @@ sub handle_send_page
     $response_code = '404 Not Found';
   }
 
-  return sprintf("HTTP/1.1 %s\r\n%s%s", $response_code, header({Connection => 'close', content_length => length($page)}), $page);
+  return sprintf("HTTP/1.1 %s\r\n%s%s",
+		 $response_code,
+		 header({connection     => 'close',
+			 content_length => length($page)}),
+		 $page);
 }
 
 sub handle_form_submission
@@ -722,18 +726,28 @@ sub handle_form_submission
     my $page = $id ? "/torrent/$id" : '/';
     my $torrent = get_torrent_by_id(CGI::unescape($id));
     my $config = $torrent->{config};
-    map {
-      $params->{$_} = CGI::unescape($params->{$_});
-      if (exists($config->{$_}) &&
-          $config->{$_}->{value} ne $params->{$_}) {
-        #######################################################################
-        # When changing CTCS server, *don't* go back to the info for this page:
-        # it belongs to another server
-        #######################################################################
-        $page = "/" if $_ eq 'ctcs_server';
-        torrent_set_config($torrent, $_, $params->{$_});
+
+    foreach my $option(keys %$config)
+    {
+      #########################################################################
+      # A mising boolean parameter indicates that the associated checkbox on
+      # the form was not set.  Set it explicitly to zero.
+      #########################################################################
+      if (!exists($params->{$option}) && $config->{$option}->{type} eq 'B')
+      {
+	$params->{$option} = '0'
       }
-    } keys %$params;
+
+      if ($config->{$option}->{value} ne $params->{$option})
+      {
+	#######################################################################
+	# When changing CTCS server, *don't* go back to the info for this page:
+	# it belongs to another server
+	#######################################################################
+	$page = "/" if $option eq 'ctcs_server';
+	torrent_set_config($torrent, $option, $params->{$option});
+      }
+    }
 
     return with_output_to_string {
       print "HTTP/1.1 302 Found\r\n";
@@ -760,7 +774,8 @@ sub handle_form_submission
         }
         elsif ($operation eq 'automanage')
         {
-          ctcs_log(LOG_INFO, "Automatically managing bandwidth allocation for '%s'",
+          ctcs_log(LOG_INFO,
+		   "Automatically managing bandwidth allocation for '%s'",
                    $torrent->{name});
           delete $torrent->{manual_upload_limit};
           delete $torrent->{manual_download_limit};
@@ -1009,9 +1024,19 @@ sub ctcs_config_table
 sub ctcs_config_table_widget
 {
   my ($field, $option) = @_;
-  return textfield(-name  => $field,
-                   -size  => 12,
-                   -value => $option->{value});
+  if ($option->{type} eq 'B')
+  {
+    return checkbox(-name    => $field,
+		    -value   => '1',
+		    -label   => '',
+		    -checked => $option->{value} eq '1');
+  }
+  else
+  {
+    return textfield(-name  => $field,
+		     -size  => 12,
+		     -value => $option->{value});
+  }
 }
 
 sub ctcs_peers_table
