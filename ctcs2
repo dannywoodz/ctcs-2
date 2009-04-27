@@ -474,7 +474,6 @@ sub reader_function_for
 sub writer_function
 {
   my $handler = shift;
-  my $close_after_write = shift;
   my $message = $handler->();
   my $message_length = length($message);
   my $message_offset = 0;
@@ -505,7 +504,6 @@ sub writer_function
              "Wrote %d bytes, leaving %d remaining. Message is%s finished",
              $written, $message_length - $message_offset, $finished ? "" : " NOT");
 
-    shift(@{$clients{$client}->{messages}}) && deregister_client($client) if ($finished && $close_after_write);
     return $finished;
   }
 }
@@ -653,16 +651,25 @@ sub handle_send_page
   my ($location, $client) = @_;
   my $response_code;
   my $page;
-  my $page_content = page_content($location);
+  my $plain = 0;
+  my $page_content = page_content($location, \$plain);
 
   if ($page_content)
   {
     $page = with_output_to_string {
-      print start_html(-title => 'CTCS 2',
-                       -head  => style({type => 'text/css'},
-                                       stylesheet())),
-                                       $page_content,
-                                       end_html();
+      if ($plain)
+      {
+        print $page_content;
+      }
+      else
+      {
+        print start_html(-title => 'CTCS 2',
+                         -script => javascript(),
+                         -head => style({type => 'text/css'},
+                                         stylesheet())),
+                                         $page_content,
+                                         end_html();
+      }
     };
     $response_code = '200 OK';
   }
@@ -678,8 +685,7 @@ sub handle_send_page
 
   return sprintf("HTTP/1.1 %s\r\n%s%s",
                  $response_code,
-                 header({connection     => 'close',
-                         content_length => length($page)}),
+                 header({content_length => length($page)}),
                  $page);
 }
 
@@ -700,6 +706,7 @@ sub handle_form_submission
     return with_output_to_string {
       print "HTTP/1.1 302 Found\r\n";
       print $query->redirect(-uri => '/');
+      print "\r\n";
     }
   }
   elsif ($target eq "/status-action")
@@ -791,12 +798,46 @@ sub handle_form_submission
 
 sub page_content
 {
-  my $page = shift;
+  my ($page, $plain_ref) = @_;
+
+  if ($page =~ m!^/torrent-status\?torrent_id=(\S+)!)
+  {
+    $$plain_ref = 1;
+    return status_line_for(CGI::unescape($1));
+  }
+  if ($page eq '/current-bandwidth-usage')
+  {
+    $$plain_ref = 1;
+    return current_bandwidth_usage();
+  }
+
   return index_page() if $page eq "/";
   return torrent_info_page($1) if $page =~ /^\/?torrent\/(.+)$/;
   return advanced_limits_page() if $page eq '/advanced-limits';
   return debug_page() if $page eq "/debug";
   return undef;
+}
+
+sub current_bandwidth_usage()
+{
+  return join('|', map { human_readable($_) . '/s' } total_used_bandwidth());
+}
+
+sub status_line_for
+{
+  my $torrent_id = shift;
+  my $torrent    = get_torrent_by_id($torrent_id);
+  return join('|',
+              ($torrent->{name},
+               sprintf('%d%%', $torrent->{percent_complete}),
+               human_readable($torrent->{download_rate}),
+               human_readable($torrent->{upload_rate}),
+               ($torrent->{active_seeders} . '/' . $torrent->{total_seeders}),
+               ($torrent->{active_leechers} . '/' . $torrent->{total_leechers}),
+               human_readable($torrent->{downloaded}, '0.2f'),
+               human_readable($torrent->{uploaded}, '0.2f'),
+               human_readable($torrent->{size}, 'd', '0.2f'),
+               formatted_ratio_for($torrent)));
 }
 
 ###############################################################################
@@ -839,61 +880,84 @@ sub index_page
              th('Seeds'), th('Leeches'), th('Downloaded'), th('Uploaded'),
              th('Size'), th('Ratio'), th('Action'));
 
-    my @torrent_info           =  sort {
+    my @torrent_info = sort {
       ($b->{percent_complete} || 0) <=> ($a->{percent_complete} || 0)
     } map { torrent_handled_by($_) } torrent_clients();
 
     for (my $count = 0; $count < @torrent_info; $count++)
     {
-      my $torrent          = $torrent_info[$count];
-      my $torrent_id       = CGI::escape($torrent->{id});
-      my $torrent_link     = a({href=> "/torrent/" . CGI::escape($torrent->{id})}, $torrent->{name});
-      my $upload_rate      = human_readable($torrent->{upload_rate});
-      my $download_rate    = human_readable($torrent->{download_rate});
-      my $total_seeders    = $torrent->{total_seeders};
-      my $active_seeders   = $torrent->{active_seeders};
-      my $total_leechers   = $torrent->{total_leechers};
-      my $active_leechers  = $torrent->{active_leechers};
-      my $downloaded       = human_readable($torrent->{downloaded}, '0.2f');
-      my $uploaded         = human_readable($torrent->{uploaded}, '0.2f');
-      my $size             = human_readable($torrent->{size}, 'd', '0.2f');
-      my $percent_complete = sprintf('%d%%', $torrent->{percent_complete});
-      my $raw_ratio        = ($torrent->{uploaded} == 0) ? 0 :
-      ($torrent->{downloaded} == 0) ? 'Inf.' :
-      $torrent->{uploaded} / $torrent->{downloaded};
-      my $ratio  = ($raw_ratio eq 'Inf.') ? 'Inf.' :
-      sprintf("%.02f", $raw_ratio);
-      my $row_class        = ($count % 2 == 0) ? 'torrent-even' : 'torrent-odd';
-      my $ratio_class      = ($ratio eq 'Inf.' || $ratio >= 2) ?
-      'excellent-ratio' : ($ratio >= 1) ?
-      'good-ratio' : ($ratio >= 0.5) ?
-      'ok-ratio' : 'poor-ratio';
-
-      my $pause_unpause = $torrent->{config}->{pause}->{value} == 1 ? "Resume" : "Pause";
-      $torrent->{config}->{pause}->{value} == 1 && ($row_class .= ' paused');
-
-      print Tr({class => $row_class},
-               td($torrent_link),
-               td({class => 'numeric'}, $percent_complete),
-               td({class => 'numeric'}, $download_rate, '/s'),
-               td({class => 'numeric'}, $upload_rate, '/s'),
-               td({class => 'numeric'}, $active_seeders, '/', $total_seeders),
-               td({class => 'numeric'}, $active_leechers, '/', $total_leechers),
-               td({class => 'numeric'}, $downloaded),
-               td({class => 'numeric'}, $uploaded),
-               td({class => 'numeric'}, $size),
-               td({class => "numeric $ratio_class"}, $ratio),
-               td(sprintf('<form name="$torrent_id" method="post" action="/status-action" enctype="%s">', $ctcs{form_encoding}),
-                  Select({name => 'action'},
-                         option({value => $pause_unpause}, $pause_unpause),
-                         option({value => 'Update'}, 'Update'),
-                         option({value => 'Quit'}, 'Quit')),
-                  submit(-name => 'submit', -value => 'Ok'),
-                  hidden(-name => 'torrent-id', -value => $torrent_id),
-                  end_form()));
+      table_row_for_torrent($torrent_info[$count],
+                            ($count % 2 == 0) ? 'torrent-even' : 'torrent-odd');
     }
+
+    print qq(<script type="text/javascript">setTimeout('update_bandwidth_figures()', 5000);</script>);
+
     print CGI::end_table();
   };
+}
+
+sub formatted_ratio_for
+{
+  my $torrent = shift;
+  my $raw_ratio        = ($torrent->{uploaded} == 0) ? 0 :
+  ($torrent->{downloaded} == 0) ? 'Inf.' :
+  $torrent->{uploaded} / $torrent->{downloaded};
+  return ($raw_ratio eq 'Inf.') ? 'Inf.' : sprintf("%.02f", $raw_ratio);
+}
+
+sub table_row_for_torrent_with_id
+{
+  my ($id, $row_class) = @_;
+  my $torrent = get_torrent_by_id($id);
+  return table_row_for_torrent($torrent, $row_class);
+}
+
+sub table_row_for_torrent
+{
+  my ($torrent, $row_class) = @_;
+  my $torrent_id       = CGI::escape($torrent->{id});
+  my $torrent_link     = a({href=> "/torrent/" . CGI::escape($torrent->{id})}, $torrent->{name});
+  my $upload_rate      = human_readable($torrent->{upload_rate});
+  my $download_rate    = human_readable($torrent->{download_rate});
+  my $total_seeders    = $torrent->{total_seeders};
+  my $active_seeders   = $torrent->{active_seeders};
+  my $total_leechers   = $torrent->{total_leechers};
+  my $active_leechers  = $torrent->{active_leechers};
+  my $downloaded       = human_readable($torrent->{downloaded}, '0.2f');
+  my $uploaded         = human_readable($torrent->{uploaded}, '0.2f');
+  my $size             = human_readable($torrent->{size}, 'd', '0.2f');
+  my $percent_complete = sprintf('%d%%', $torrent->{percent_complete});
+  my $ratio            = formatted_ratio_for($torrent);
+  my $ratio_class      = ($ratio eq 'Inf.' || $ratio >= 2) ?
+  'excellent-ratio' : ($ratio >= 1) ?
+  'good-ratio' : ($ratio >= 0.5) ?
+  'ok-ratio' : 'poor-ratio';
+
+  my $pause_unpause = $torrent->{config}->{pause}->{value} == 1 ? "Resume" : "Pause";
+
+  $torrent->{config}->{pause}->{value} == 1 && ($row_class .= ' paused');
+
+  print Tr({class                  => $row_class,
+            id                     => $torrent_id},
+           td($torrent_link),
+           td({class               => 'numeric', id => "percent_complete-$torrent_id"}, $percent_complete),
+           td({class               => 'numeric', id => "download_rate-$torrent_id"}, $download_rate, '/s'),
+           td({class               => 'numeric', id => "upload_rate-$torrent_id"}, $upload_rate, '/s'),
+           td({class               => 'numeric', id => "seeders-$torrent_id"}, $active_seeders, '/', $total_seeders),
+           td({class               => 'numeric', id => "leechers-$torrent_id"}, $active_leechers, '/', $total_leechers),
+           td({class               => 'numeric', id => "downloaded-$torrent_id"}, $downloaded),
+           td({class               => 'numeric', id => "uploaded-$torrent_id"}, $uploaded),
+           td({class               => 'numeric', id => "size-$torrent_id"}, $size),
+           td({class               => "numeric $ratio_class", id => "ratio-$torrent_id"}, $ratio),
+           td(sprintf('<form name="$torrent_id" method="post" action="/status-action" enctype="%s">', $ctcs{form_encoding}),
+              Select({name         => 'action'},
+                     option({value => $pause_unpause}, $pause_unpause),
+                     option({value => 'Update'}, 'Update'),
+                     option({value => 'Quit'}, 'Quit')),
+              submit(-name         => 'submit', -value => 'Ok'),
+              hidden(-name         => 'torrent-id', -value => $torrent_id),
+              end_form()));
+  print qq(<script type="text/javascript">setTimeout('update_torrent_row("$torrent_id")', 5000);</script>);
 }
 
 ###############################################################################
@@ -1795,6 +1859,74 @@ sub peer_count_for
 {
   my $info = torrent_handled_by(shift);
   return scalar @{$info->{peers}}
+}
+
+sub javascript
+{
+  my $script=<<END_JS;
+  function ajaxObject()
+  {
+  var xmlHttp;
+  try {
+    // Firefox, Opera 8.0+, Safari
+    xmlHttp=new XMLHttpRequest();
+  }
+  catch (e) {
+    // Internet Explorer
+    try {
+      xmlHttp=new ActiveXObject("Msxml2.XMLHTTP");
+    }
+    catch (e) {
+      try {
+        xmlHttp=new ActiveXObject("Microsoft.XMLHTTP");
+      }
+      catch (e) {
+        alert("Your browser does not support AJAX!");
+        return false;
+      }
+    }
+  }
+  return xmlHttp;
+  }
+
+  function update_bandwidth_figures()
+  {
+    var xmlHttp = ajaxObject();
+    xmlHttp.onreadystatechange = function() {
+      if (xmlHttp.readyState == 4) {
+        fields = xmlHttp.responseText.split('|');
+        document.getElementById('download-bandwidth').innerHTML = fields[0];
+        document.getElementById('upload-bandwidth').innerHTML = fields[1];
+      }
+    }
+    xmlHttp.open("GET", "/current-bandwidth-usage")
+    xmlHttp.send(null);
+    setTimeout('update_bandwidth_figures()', 5000);
+  }
+
+  function update_torrent_row(row_id)
+  {
+  var xmlHttp = ajaxObject();
+  var row = document.getElementById(row_id);
+  xmlHttp.onreadystatechange = function () {
+    if (xmlHttp.readyState == 4) {
+      fields = xmlHttp.responseText.split('|');
+      document.getElementById('percent_complete-' + row_id).innerHTML = fields[1];
+      document.getElementById('download_rate-' + row_id).innerHTML = fields[2];
+      document.getElementById('upload_rate-' + row_id).innerHTML = fields[3];
+      document.getElementById('seeders-' + row_id).innerHTML = fields[4];
+      document.getElementById('leechers-' + row_id).innerHTML = fields[5];
+      document.getElementById('downloaded-' + row_id).innerHTML = fields[6];
+      document.getElementById('uploaded-' + row_id).innerHTML = fields[7];
+      document.getElementById('size-' + row_id).innerHTML = fields[8];
+      document.getElementById('ratio-' + row_id).innerHTML = fields[9];
+    }
+  }
+  xmlHttp.open("GET", "torrent-status?torrent_id=" + row_id);
+  xmlHttp.send(null);
+  setTimeout('update_torrent_row("' + row_id + '")', 5000);
+}
+END_JS
 }
 
 ###############################################################################
