@@ -1929,6 +1929,8 @@ sub javascript
   {
     var xmlHttp = ajaxObject();
 
+    if(!xmlHttp) return;
+
     xmlHttp.onreadystatechange = function() {
       if (xmlHttp.readyState == 4) {
         data = eval('(' + xmlHttp.responseText + ')');
