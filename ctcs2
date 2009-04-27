@@ -677,7 +677,6 @@ sub handle_send_page
                          -head => style({type => 'text/css'},
                                          stylesheet())),
                                          $page_content,
-                                         q(<script type="text/javascript">setTimeout('update_with_current_status()', 5000);</script>),
                                          end_html();
       }
     };
@@ -962,6 +961,7 @@ sub index_page
 		  end_form()));
     }
     print CGI::end_table();
+    print q(<script type="text/javascript">setTimeout('update_with_current_status()', 5000);</script>);
   };
 }
 
@@ -1179,9 +1179,12 @@ sub error_page
 sub handle_dump
 {
   return with_output_to_string {
-    print "CTCS\r\n";
-    print Dumper(\%ctcs);
-    print "READERS\n\n";
+    print "CTCS\n\n";
+    while(my ($key, $value) = each %ctcs)
+    {
+      printf "%s: %s\n", $key, $value;
+    }
+    print "\nREADERS\n\n";
     map { printf "%s: %s:%d (%s)\n",
           $_,
           defined($_->peerport()) ? address_of($_) : 'SERVER',
@@ -1932,7 +1935,7 @@ sub javascript
     if (document.getElementById('auto-refresh').checked)
     {
       xmlHttp.onreadystatechange = function() {
-        if (xmlHttp.readyState == 4) {
+        if (xmlHttp.readyState == 4 && xmlHttp.responseText) {
           data = eval('(' + xmlHttp.responseText + ')');
           document.getElementById('download-bandwidth').innerHTML = data["download"];
           document.getElementById('upload-bandwidth').innerHTML = data["upload"];
