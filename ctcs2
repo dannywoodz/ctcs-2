@@ -823,24 +823,32 @@ sub page_content
 
 sub current_bandwidth_usage()
 {
-  return join('|', map { human_readable($_) . '/s' } total_used_bandwidth());
+  my @bandwidths = total_used_bandwidth();
+  return sprintf('{ "download": "%s/s", "upload": "%s/s" }',
+                 human_readable($bandwidths[0]),
+                 human_readable($bandwidths[1]));
 }
 
 sub status_line_for
 {
   my $torrent_id = shift;
   my $torrent    = get_torrent_by_id($torrent_id);
-  return join('|',
-              ($torrent->{name},
-               sprintf('%d%%', $torrent->{percent_complete}),
-               human_readable($torrent->{download_rate}) . ' /s',
-               human_readable($torrent->{upload_rate}) . ' /s',
-               ($torrent->{active_seeders} . '/' . $torrent->{total_seeders}),
-               ($torrent->{active_leechers} . '/' . $torrent->{total_leechers}),
-               human_readable($torrent->{downloaded}, '0.2f'),
-               human_readable($torrent->{uploaded}, '0.2f'),
-               human_readable($torrent->{size}, 'd', '0.2f'),
-               formatted_ratio_for($torrent)));
+  return sprintf(join('',
+                      ('{ "name": "%s", "percent-complete": "%s", ',
+                       '"download-rate": "%s", "upload-rate": "%s", ',
+                       '"seeders": "%s", "leechers": "%s", ',
+                       '"downloaded": "%s", "uploaded": "%s", "size": "%s", ',
+                       '"ratio": "%s" }')),
+                 ($torrent->{name},
+                  sprintf('%d%%', $torrent->{percent_complete}),
+                  human_readable($torrent->{download_rate}) . ' /s',
+                  human_readable($torrent->{upload_rate}) . ' /s',
+                  ($torrent->{active_seeders} . '/' . $torrent->{total_seeders}),
+                  ($torrent->{active_leechers} . '/' . $torrent->{total_leechers}),
+                  human_readable($torrent->{downloaded}, '0.2f'),
+                  human_readable($torrent->{uploaded}, '0.2f'),
+                  human_readable($torrent->{size}, 'd', '0.2f'),
+                  formatted_ratio_for($torrent)));
 }
 
 ###############################################################################
@@ -1897,9 +1905,9 @@ sub javascript
     var xmlHttp = ajaxObject();
     xmlHttp.onreadystatechange = function() {
       if (xmlHttp.readyState == 4) {
-        fields = xmlHttp.responseText.split('|');
-        document.getElementById('download-bandwidth').innerHTML = fields[0];
-        document.getElementById('upload-bandwidth').innerHTML = fields[1];
+      fields = eval('(' + xmlHttp.responseText + ')');
+      document.getElementById('download-bandwidth').innerHTML = fields["download"];
+      document.getElementById('upload-bandwidth').innerHTML = fields["upload"];
       }
     }
     xmlHttp.open("GET", "/current-bandwidth-usage")
@@ -1913,16 +1921,16 @@ sub javascript
   var row = document.getElementById(row_id);
   xmlHttp.onreadystatechange = function () {
     if (xmlHttp.readyState == 4) {
-      fields = xmlHttp.responseText.split('|');
-      document.getElementById('percent_complete-' + row_id).innerHTML = fields[1];
-      document.getElementById('download_rate-' + row_id).innerHTML = fields[2];
-      document.getElementById('upload_rate-' + row_id).innerHTML = fields[3];
-      document.getElementById('seeders-' + row_id).innerHTML = fields[4];
-      document.getElementById('leechers-' + row_id).innerHTML = fields[5];
-      document.getElementById('downloaded-' + row_id).innerHTML = fields[6];
-      document.getElementById('uploaded-' + row_id).innerHTML = fields[7];
-      document.getElementById('size-' + row_id).innerHTML = fields[8];
-      document.getElementById('ratio-' + row_id).innerHTML = fields[9];
+      fields = eval('(' + xmlHttp.responseText + ')');
+      document.getElementById('percent_complete-' + row_id).innerHTML = fields["percent-complete"];
+      document.getElementById('download_rate-' + row_id).innerHTML = fields["download-rate"];
+      document.getElementById('upload_rate-' + row_id).innerHTML = fields["upload-rate"];
+      document.getElementById('seeders-' + row_id).innerHTML = fields["seeders"];
+      document.getElementById('leechers-' + row_id).innerHTML = fields["leechers"];
+      document.getElementById('downloaded-' + row_id).innerHTML = fields["downloaded"];
+      document.getElementById('uploaded-' + row_id).innerHTML = fields["uploaded"];
+      document.getElementById('size-' + row_id).innerHTML = fields["size"];
+      document.getElementById('ratio-' + row_id).innerHTML = fields["ratio"];
     }
   }
   xmlHttp.open("GET", "torrent-status?torrent_id=" + row_id);
