@@ -609,7 +609,7 @@ sub function_to_handle_request
   {
     my $target = $1;
     my $close_after_write = $message =~ /Connection: close/i;
-    return writer_function(sub { handle_send_page($1, $client) }, $close_after_write);
+    return writer_function(sub { handle_send_page($target, $client) }, $close_after_write);
   }
   elsif (/^POST\s+([^\s]+)/)
   {
@@ -676,6 +676,7 @@ sub handle_send_page
                          -head => style({type => 'text/css'},
                                          stylesheet())),
                                          $page_content,
+					 q(<script type="text/javascript">setTimeout('update_with_current_status()', 5000);</script>),
                                          end_html();
       }
     };
@@ -808,15 +809,10 @@ sub page_content
 {
   my ($page, $plain_ref) = @_;
 
-  if ($page =~ m!^/torrent-status\?torrent_id=(\S+)!)
+  if ($page eq '/current-status')
   {
     $$plain_ref = 1;
-    return status_line_for(CGI::unescape($1));
-  }
-  if ($page eq '/current-bandwidth-usage')
-  {
-    $$plain_ref = 1;
-    return current_bandwidth_usage();
+    return json_status();
   }
 
   return index_page() if $page eq "/";
@@ -826,34 +822,41 @@ sub page_content
   return undef;
 }
 
-sub current_bandwidth_usage()
-{
-  my @bandwidths = total_used_bandwidth();
-  return sprintf('{ "download": "%s/s", "upload": "%s/s" }',
-                 human_readable($bandwidths[0]),
-                 human_readable($bandwidths[1]));
-}
-
-sub status_line_for
+sub json_status
 {
   my $torrent_id = shift;
-  my $torrent    = get_torrent_by_id($torrent_id);
-  return sprintf(join('',
-                      ('{ "name": "%s", "percent-complete": "%s", ',
-                       '"download-rate": "%s", "upload-rate": "%s", ',
-                       '"seeders": "%s", "leechers": "%s", ',
-                       '"downloaded": "%s", "uploaded": "%s", "size": "%s", ',
-                       '"ratio": "%s" }')),
-                 ($torrent->{name},
-                  sprintf('%d%%', $torrent->{percent_complete}),
-                  human_readable($torrent->{download_rate}) . ' /s',
-                  human_readable($torrent->{upload_rate}) . ' /s',
-                  ($torrent->{active_seeders} . '/' . $torrent->{total_seeders}),
-                  ($torrent->{active_leechers} . '/' . $torrent->{total_leechers}),
-                  human_readable($torrent->{downloaded}, '0.2f'),
-                  human_readable($torrent->{uploaded}, '0.2f'),
-                  human_readable($torrent->{size}, 'd', '0.2f'),
-                  formatted_ratio_for($torrent)));
+  my $status = IO::String->new();
+  print $status sprintf('{ "download": "%s", "upload": "%s", "torrents": [',
+			map { human_readable($_) . '/s' } total_used_bandwidth());
+  foreach my $client(torrent_clients())
+  {
+    my $torrent = torrent_handled_by($client);
+    printf $status join(', ',
+			('{"id": "%s"',
+			 '"name": "%s"',
+			 '"percent-complete": "%s"',
+			 '"download-rate": "%s"',
+			 '"upload-rate": "%s"',
+			 '"seeders": "%s"',
+			 '"leechers": "%s"',
+			 '"downloaded": "%s"',
+			 '"uploaded": "%s"',
+			 '"size": "%s"',
+			 '"ratio": "%s"}')),
+			 CGI::escape($torrent->{id}),
+			 $torrent->{name},
+			 sprintf('%d%%', $torrent->{percent_complete}),
+			 human_readable($torrent->{download_rate}) . '/s',
+			 human_readable($torrent->{upload_rate}) . '/s',
+			 ($torrent->{active_seeders} . '/' . $torrent->{total_seeders}),
+			 ($torrent->{active_leechers} . '/' . $torrent->{total_leechers}),
+			 human_readable($torrent->{downloaded}, '0.2f'),
+			 human_readable($torrent->{uploaded}, '0.2f'),
+			 human_readable($torrent->{size}, 'd', '0.2f'),
+			 formatted_ratio_for($torrent);
+  }
+  print $status ']}';
+  return ${$status->string_ref()};
 }
 
 ###############################################################################
@@ -906,8 +909,6 @@ sub index_page
                             ($count % 2 == 0) ? 'torrent-even' : 'torrent-odd');
     }
 
-    print qq(<script type="text/javascript">setTimeout('update_bandwidth_figures()', 5000);</script>);
-
     print CGI::end_table();
   };
 }
@@ -957,8 +958,8 @@ sub table_row_for_torrent
             id                     => $torrent_id},
            td($torrent_link),
            td({class               => 'numeric', id => "percent_complete-$torrent_id"}, $percent_complete),
-           td({class               => 'numeric', id => "download_rate-$torrent_id"}, $download_rate, '/s'),
-           td({class               => 'numeric', id => "upload_rate-$torrent_id"}, $upload_rate, '/s'),
+           td({class               => 'numeric', id => "download_rate-$torrent_id"}, $download_rate . '/s'),
+           td({class               => 'numeric', id => "upload_rate-$torrent_id"}, $upload_rate . '/s'),
            td({class               => 'numeric', id => "seeders-$torrent_id"}, $active_seeders, '/', $total_seeders),
            td({class               => 'numeric', id => "leechers-$torrent_id"}, $active_leechers, '/', $total_leechers),
            td({class               => 'numeric', id => "downloaded-$torrent_id"}, $downloaded),
@@ -973,7 +974,6 @@ sub table_row_for_torrent
               submit(-name         => 'submit', -value => 'Ok'),
               hidden(-name         => 'torrent-id', -value => $torrent_id),
               end_form()));
-  print qq(<script type="text/javascript">setTimeout('update_torrent_row("$torrent_id")', 5000);</script>);
 }
 
 ###############################################################################
@@ -1880,78 +1880,62 @@ sub peer_count_for
 sub javascript
 {
   my $script=<<END_JS;
-  var updaters = new Array();
+  var xmlHttp = null;
 
   function ajaxObject()
   {
-  var xmlHttp;
-  try {
-    // Firefox, Opera 8.0+, Safari
-    xmlHttp=new XMLHttpRequest();
-  }
-  catch (e) {
-    // Internet Explorer
+    if (xmlHttp) return xmlHttp;
     try {
-      xmlHttp=new ActiveXObject("Msxml2.XMLHTTP");
+      // Firefox, Opera 8.0+, Safari
+      xmlHttp=new XMLHttpRequest();
     }
     catch (e) {
+      // Internet Explorer
       try {
-        xmlHttp=new ActiveXObject("Microsoft.XMLHTTP");
+        xmlHttp=new ActiveXObject("Msxml2.XMLHTTP");
       }
       catch (e) {
-        alert("Your browser does not support AJAX!");
-        return false;
+        try {
+          xmlHttp=new ActiveXObject("Microsoft.XMLHTTP");
+        }
+        catch (e) {
+          alert("Your browser does not support AJAX!");
+          return false;
+        }
       }
     }
-  }
-  return xmlHttp;
+    return xmlHttp;
   }
 
-  function update_bandwidth_figures()
+  function update_with_current_status()
   {
-    var xmlHttp = updaters['bandwidth'];
-    if (!xmlHttp)
-    {
-      xmlHttp = updaters['bandwidth'] = ajaxObject();
-    }
+    var xmlHttp = ajaxObject();
+
     xmlHttp.onreadystatechange = function() {
       if (xmlHttp.readyState == 4) {
-      fields = eval('(' + xmlHttp.responseText + ')');
-      document.getElementById('download-bandwidth').innerHTML = fields["download"];
-      document.getElementById('upload-bandwidth').innerHTML = fields["upload"];
+        data = eval('(' + xmlHttp.responseText + ')');
+        document.getElementById('download-bandwidth').innerHTML = data["download"];
+        document.getElementById('upload-bandwidth').innerHTML = data["upload"];
+        var torrent_data = data["torrents"];
+        for (var i = 0; i < torrent_data.length; i++) {
+          var torrent = torrent_data[i];
+          var row_id = torrent["id"];
+          document.getElementById('percent_complete-' + row_id).innerHTML = torrent["percent-complete"];
+          document.getElementById('download_rate-' + row_id).innerHTML = torrent["download-rate"];
+          document.getElementById('upload_rate-' + row_id).innerHTML = torrent["upload-rate"];
+          document.getElementById('seeders-' + row_id).innerHTML = torrent["seeders"];
+          document.getElementById('leechers-' + row_id).innerHTML = torrent["leechers"];
+          document.getElementById('downloaded-' + row_id).innerHTML = torrent["downloaded"];
+          document.getElementById('uploaded-' + row_id).innerHTML = torrent["uploaded"];
+          document.getElementById('size-' + row_id).innerHTML = torrent["size"];
+          document.getElementById('ratio-' + row_id).innerHTML = torrent["ratio"];
+        }
       }
-    }
-    xmlHttp.open("GET", "/current-bandwidth-usage")
+    };
+    xmlHttp.open("GET", "/current-status")
     xmlHttp.send(null);
-    setTimeout('update_bandwidth_figures()', 5000);
+    setTimeout('update_with_current_status()', 5000);
   }
-
-  function update_torrent_row(row_id)
-  {
-  var xmlHttp = updaters[row_id];
-  if (!xmlHttp)
-  {
-    xmlHttp = updaters[row_id] = ajaxObject();
-  }
-  var row = document.getElementById(row_id);
-  xmlHttp.onreadystatechange = function () {
-    if (xmlHttp.readyState == 4) {
-      fields = eval('(' + xmlHttp.responseText + ')');
-      document.getElementById('percent_complete-' + row_id).innerHTML = fields["percent-complete"];
-      document.getElementById('download_rate-' + row_id).innerHTML = fields["download-rate"];
-      document.getElementById('upload_rate-' + row_id).innerHTML = fields["upload-rate"];
-      document.getElementById('seeders-' + row_id).innerHTML = fields["seeders"];
-      document.getElementById('leechers-' + row_id).innerHTML = fields["leechers"];
-      document.getElementById('downloaded-' + row_id).innerHTML = fields["downloaded"];
-      document.getElementById('uploaded-' + row_id).innerHTML = fields["uploaded"];
-      document.getElementById('size-' + row_id).innerHTML = fields["size"];
-      document.getElementById('ratio-' + row_id).innerHTML = fields["ratio"];
-    }
-  }
-  xmlHttp.open("GET", "torrent-status?torrent_id=" + row_id);
-  xmlHttp.send(null);
-  setTimeout('update_torrent_row("' + row_id + '")', 5000);
-}
 END_JS
 }
 
