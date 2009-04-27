@@ -635,7 +635,10 @@ sub with_output_to_string(&)
   my $function = shift;
   my $string = IO::String->new();
   my $oldfd = select $string;
+  my $oldflush = $|;
+  $| = 1;
   eval { $function->() };
+  $| = $oldflush;
   select $oldfd;
   die $@ if $@;
   return ${$string->string_ref()};
