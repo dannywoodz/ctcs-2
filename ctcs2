@@ -905,10 +905,52 @@ sub index_page
 
     for (my $count = 0; $count < @torrent_info; $count++)
     {
-      table_row_for_torrent($torrent_info[$count],
-                            ($count % 2 == 0) ? 'torrent-even' : 'torrent-odd');
-    }
+      my $torrent          = $torrent_info[$count];
+      my $torrent_id       = CGI::escape($torrent->{id});
+      my $torrent_link     = a({href=> "/torrent/" . CGI::escape($torrent->{id})}, $torrent->{name});
+      my $upload_rate      = human_readable($torrent->{upload_rate});
+      my $download_rate    = human_readable($torrent->{download_rate});
+      my $total_seeders    = $torrent->{total_seeders};
+      my $active_seeders   = $torrent->{active_seeders};
+      my $total_leechers   = $torrent->{total_leechers};
+      my $active_leechers  = $torrent->{active_leechers};
+      my $downloaded       = human_readable($torrent->{downloaded}, '0.2f');
+      my $uploaded         = human_readable($torrent->{uploaded}, '0.2f');
+      my $size             = human_readable($torrent->{size}, 'd', '0.2f');
+      my $percent_complete = sprintf('%d%%', $torrent->{percent_complete});
+      my $ratio            = formatted_ratio_for($torrent);
+      my $row_class        = ($count % 2 == 0) ? 'torrent-even' : 'torrent-odd';
+      my $ratio_class      = ($ratio eq 'Inf.' || $ratio >= 2) ?
+      'excellent-ratio' : ($ratio >= 1) ?
+      'good-ratio' : ($ratio >= 0.5) ?
+      'ok-ratio' : 'poor-ratio';
 
+      my $pause_unpause = $torrent->{config}->{pause}->{value} == 1 ? "Resume" : "Pause";
+
+      $torrent->{config}->{pause}->{value} == 1 && ($row_class .= ' paused');
+
+      print Tr({class => $row_class,
+		id    => $torrent_id},
+	       td($torrent_link),
+	       td({class => 'numeric', id => "percent_complete-$torrent_id"}, $percent_complete),
+	       td({class => 'numeric', id => "download_rate-$torrent_id"}, $download_rate . '/s'),
+	       td({class => 'numeric', id => "upload_rate-$torrent_id"}, $upload_rate . '/s'),
+	       td({class => 'numeric', id => "seeders-$torrent_id"}, $active_seeders, '/', $total_seeders),
+	       td({class => 'numeric', id => "leechers-$torrent_id"}, $active_leechers, '/', $total_leechers),
+	       td({class => 'numeric', id => "downloaded-$torrent_id"}, $downloaded),
+	       td({class => 'numeric', id => "uploaded-$torrent_id"}, $uploaded),
+	       td({class => 'numeric', id => "size-$torrent_id"}, $size),
+	       td({class => "numeric $ratio_class", id => "ratio-$torrent_id"}, $ratio),
+	       td(sprintf('<form name="$torrent_id" method="post" action="/status-action" enctype="%s">',
+			  $ctcs{form_encoding}),
+		  Select({name         => 'action'},
+			 option({value => $pause_unpause}, $pause_unpause),
+			 option({value => 'Update'}, 'Update'),
+			 option({value => 'Quit'}, 'Quit')),
+		  submit(-name         => 'submit', -value => 'Ok'),
+		  hidden(-name         => 'torrent-id', -value => $torrent_id),
+		  end_form()));
+    }
     print CGI::end_table();
   };
 }
@@ -920,60 +962,6 @@ sub formatted_ratio_for
   ($torrent->{downloaded} == 0) ? 'Inf.' :
   $torrent->{uploaded} / $torrent->{downloaded};
   return ($raw_ratio eq 'Inf.') ? 'Inf.' : sprintf("%.02f", $raw_ratio);
-}
-
-sub table_row_for_torrent_with_id
-{
-  my ($id, $row_class) = @_;
-  my $torrent = get_torrent_by_id($id);
-  return table_row_for_torrent($torrent, $row_class);
-}
-
-sub table_row_for_torrent
-{
-  my ($torrent, $row_class) = @_;
-  my $torrent_id       = CGI::escape($torrent->{id});
-  my $torrent_link     = a({href=> "/torrent/" . CGI::escape($torrent->{id})}, $torrent->{name});
-  my $upload_rate      = human_readable($torrent->{upload_rate});
-  my $download_rate    = human_readable($torrent->{download_rate});
-  my $total_seeders    = $torrent->{total_seeders};
-  my $active_seeders   = $torrent->{active_seeders};
-  my $total_leechers   = $torrent->{total_leechers};
-  my $active_leechers  = $torrent->{active_leechers};
-  my $downloaded       = human_readable($torrent->{downloaded}, '0.2f');
-  my $uploaded         = human_readable($torrent->{uploaded}, '0.2f');
-  my $size             = human_readable($torrent->{size}, 'd', '0.2f');
-  my $percent_complete = sprintf('%d%%', $torrent->{percent_complete});
-  my $ratio            = formatted_ratio_for($torrent);
-  my $ratio_class      = ($ratio eq 'Inf.' || $ratio >= 2) ?
-  'excellent-ratio' : ($ratio >= 1) ?
-  'good-ratio' : ($ratio >= 0.5) ?
-  'ok-ratio' : 'poor-ratio';
-
-  my $pause_unpause = $torrent->{config}->{pause}->{value} == 1 ? "Resume" : "Pause";
-
-  $torrent->{config}->{pause}->{value} == 1 && ($row_class .= ' paused');
-
-  print Tr({class                  => $row_class,
-            id                     => $torrent_id},
-           td($torrent_link),
-           td({class               => 'numeric', id => "percent_complete-$torrent_id"}, $percent_complete),
-           td({class               => 'numeric', id => "download_rate-$torrent_id"}, $download_rate . '/s'),
-           td({class               => 'numeric', id => "upload_rate-$torrent_id"}, $upload_rate . '/s'),
-           td({class               => 'numeric', id => "seeders-$torrent_id"}, $active_seeders, '/', $total_seeders),
-           td({class               => 'numeric', id => "leechers-$torrent_id"}, $active_leechers, '/', $total_leechers),
-           td({class               => 'numeric', id => "downloaded-$torrent_id"}, $downloaded),
-           td({class               => 'numeric', id => "uploaded-$torrent_id"}, $uploaded),
-           td({class               => 'numeric', id => "size-$torrent_id"}, $size),
-           td({class               => "numeric $ratio_class", id => "ratio-$torrent_id"}, $ratio),
-           td(sprintf('<form name="$torrent_id" method="post" action="/status-action" enctype="%s">', $ctcs{form_encoding}),
-              Select({name         => 'action'},
-                     option({value => $pause_unpause}, $pause_unpause),
-                     option({value => 'Update'}, 'Update'),
-                     option({value => 'Quit'}, 'Quit')),
-              submit(-name         => 'submit', -value => 'Ok'),
-              hidden(-name         => 'torrent-id', -value => $torrent_id),
-              end_form()));
 }
 
 ###############################################################################
