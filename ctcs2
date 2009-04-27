@@ -607,7 +607,9 @@ sub function_to_handle_request
   }
   elsif (/^GET\s+([^\s]+)/)
   {
-    return writer_function(sub { handle_send_page($1, $client) }, 1);
+    my $target = $1;
+    my $close_after_write = $message =~ /Connection: close/i;
+    return writer_function(sub { handle_send_page($1, $client) }, $close_after_write);
   }
   elsif (/^POST\s+([^\s]+)/)
   {
@@ -1878,6 +1880,8 @@ sub peer_count_for
 sub javascript
 {
   my $script=<<END_JS;
+  var updaters = new Array();
+
   function ajaxObject()
   {
   var xmlHttp;
@@ -1905,7 +1909,11 @@ sub javascript
 
   function update_bandwidth_figures()
   {
-    var xmlHttp = ajaxObject();
+    var xmlHttp = updaters['bandwidth'];
+    if (!xmlHttp)
+    {
+      xmlHttp = updaters['bandwidth'] = ajaxObject();
+    }
     xmlHttp.onreadystatechange = function() {
       if (xmlHttp.readyState == 4) {
       fields = eval('(' + xmlHttp.responseText + ')');
@@ -1920,7 +1928,11 @@ sub javascript
 
   function update_torrent_row(row_id)
   {
-  var xmlHttp = ajaxObject();
+  var xmlHttp = updaters[row_id];
+  if (!xmlHttp)
+  {
+    xmlHttp = updaters[row_id] = ajaxObject();
+  }
   var row = document.getElementById(row_id);
   xmlHttp.onreadystatechange = function () {
     if (xmlHttp.readyState == 4) {
