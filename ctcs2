@@ -830,33 +830,34 @@ sub json_status
   my $status = IO::String->new();
   print $status sprintf('{ "download": "%s", "upload": "%s", "torrents": [',
                         map { human_readable($_) . '/s' } total_used_bandwidth());
-  foreach my $client(torrent_clients())
-  {
-    my $torrent = torrent_handled_by($client);
-    printf $status join(', ',
-                        ('{"id": "%s"',
-                         '"name": "%s"',
-                         '"percent-complete": "%s"',
-                         '"download-rate": "%s"',
-                         '"upload-rate": "%s"',
-                         '"seeders": "%s"',
-                         '"leechers": "%s"',
-                         '"downloaded": "%s"',
-                         '"uploaded": "%s"',
-                         '"size": "%s"',
-                         '"ratio": "%s"}')),
-                         CGI::escape($torrent->{id}),
-                         $torrent->{name},
-                         sprintf('%d%%', $torrent->{percent_complete}),
-                         human_readable($torrent->{download_rate}) . '/s',
-                         human_readable($torrent->{upload_rate}) . '/s',
-                         ($torrent->{active_seeders} . '/' . $torrent->{total_seeders}),
-                         ($torrent->{active_leechers} . '/' . $torrent->{total_leechers}),
-                         human_readable($torrent->{downloaded}, '0.2f'),
-                         human_readable($torrent->{uploaded}, '0.2f'),
-                         human_readable($torrent->{size}, 'd', '0.2f'),
-                         formatted_ratio_for($torrent);
-  }
+
+  printf $status join(',',
+		      map {
+			my $torrent = torrent_handled_by($_);
+			sprintf(join(', ',
+				     ('{"id": "%s"',
+				      '"name": "%s"',
+				      '"percent-complete": "%s"',
+				      '"download-rate": "%s"',
+				      '"upload-rate": "%s"',
+				      '"seeders": "%s"',
+				      '"leechers": "%s"',
+				      '"downloaded": "%s"',
+				      '"uploaded": "%s"',
+				      '"size": "%s"',
+				      '"ratio": "%s"}')),
+				(CGI::escape($torrent->{id}),
+				 $torrent->{name},
+				 sprintf('%d%%', $torrent->{percent_complete}),
+				 human_readable($torrent->{download_rate}) . '/s',
+				 human_readable($torrent->{upload_rate}) . '/s',
+				 ($torrent->{active_seeders} . '/' . $torrent->{total_seeders}),
+				 ($torrent->{active_leechers} . '/' . $torrent->{total_leechers}),
+				 human_readable($torrent->{downloaded}, '0.2f'),
+				 human_readable($torrent->{uploaded}, '0.2f'),
+				 human_readable($torrent->{size}, 'd', '0.2f'),
+				 formatted_ratio_for($torrent)))
+		      } torrent_clients());
   print $status ']}';
   return ${$status->string_ref()};
 }
