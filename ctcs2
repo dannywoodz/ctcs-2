@@ -212,6 +212,7 @@ $ctcs{log_timestamps}       = !$suppress_log_timestamps;
 $ctcs{log_level}            = LOG_INFO;
 $ctcs{log_file_handle}      = \*STDOUT;
 $ctcs{form_encoding}        = 'application/x-www-form-urlencoded';
+$ctcs{auto_refresh}         = 1;
 
 ctcs_log(LOG_INFO, "CTCS Server started on port $port");
 
@@ -709,8 +710,10 @@ sub handle_form_submission
   {
     my $upload_limit              =  $query->param('ulimit');
     my $download_limit            =  $query->param('dlimit');
+    my $auto_refresh              =  $query->param('auto-refresh');
     $ctcs{download_limit}         =  (int($download_limit) * 1024) if defined $download_limit;
     $ctcs{upload_limit}           =  (int($upload_limit) * 1024) if defined $upload_limit;
+    $ctcs{auto_refresh}           =  ($auto_refresh && int($auto_refresh)) || 0;
     autobalance_bandwidth();
     return with_output_to_string {
       print "HTTP/1.1 302 Found\r\n";
@@ -888,6 +891,13 @@ sub index_page
                     Tr(th('Current Upload Bandwidth:'), td({class => 'numeric', id => 'upload-bandwidth'}, $current_upload_field . '/s')),
                     Tr(th('Global Download Limit:'), td($download_field, ' KB/s')),
                     Tr(th('Global Upload Limit:'), td($upload_field, ' KB/s')),
+		    Tr(th('Auto-Refresh:'),
+		       td({class => 'numeric'},
+			  checkbox(-name    => 'auto-refresh',
+				   -label   => '',
+				   -value   => '1',
+				   -id      => 'auto-refresh',
+				   -checked => $ctcs{auto_refresh}))),
                     Tr(td(a({href  => '/advanced-limits',
                              title => 'Fine-grained control over bandwidth limits'},
                             'Advanced Limits')),
@@ -1919,29 +1929,32 @@ sub javascript
 
     if(!xmlHttp) return;
 
-    xmlHttp.onreadystatechange = function() {
-      if (xmlHttp.readyState == 4) {
-        data = eval('(' + xmlHttp.responseText + ')');
-        document.getElementById('download-bandwidth').innerHTML = data["download"];
-        document.getElementById('upload-bandwidth').innerHTML = data["upload"];
-        var torrent_data = data["torrents"];
-        for (var i = 0; i < torrent_data.length; i++) {
-          var torrent = torrent_data[i];
-          var row_id = torrent["id"];
-          document.getElementById('percent_complete-' + row_id).innerHTML = torrent["percent-complete"];
-          document.getElementById('download_rate-' + row_id).innerHTML = torrent["download-rate"];
-          document.getElementById('upload_rate-' + row_id).innerHTML = torrent["upload-rate"];
-          document.getElementById('seeders-' + row_id).innerHTML = torrent["seeders"];
-          document.getElementById('leechers-' + row_id).innerHTML = torrent["leechers"];
-          document.getElementById('downloaded-' + row_id).innerHTML = torrent["downloaded"];
-          document.getElementById('uploaded-' + row_id).innerHTML = torrent["uploaded"];
-          document.getElementById('size-' + row_id).innerHTML = torrent["size"];
-          document.getElementById('ratio-' + row_id).innerHTML = torrent["ratio"];
+    if (document.getElementById('auto-refresh').checked)
+    {
+      xmlHttp.onreadystatechange = function() {
+        if (xmlHttp.readyState == 4) {
+          data = eval('(' + xmlHttp.responseText + ')');
+          document.getElementById('download-bandwidth').innerHTML = data["download"];
+          document.getElementById('upload-bandwidth').innerHTML = data["upload"];
+          var torrent_data = data["torrents"];
+          for (var i = 0; i < torrent_data.length; i++) {
+            var torrent = torrent_data[i];
+            var row_id = torrent["id"];
+            document.getElementById('percent_complete-' + row_id).innerHTML = torrent["percent-complete"];
+            document.getElementById('download_rate-' + row_id).innerHTML = torrent["download-rate"];
+            document.getElementById('upload_rate-' + row_id).innerHTML = torrent["upload-rate"];
+            document.getElementById('seeders-' + row_id).innerHTML = torrent["seeders"];
+            document.getElementById('leechers-' + row_id).innerHTML = torrent["leechers"];
+            document.getElementById('downloaded-' + row_id).innerHTML = torrent["downloaded"];
+            document.getElementById('uploaded-' + row_id).innerHTML = torrent["uploaded"];
+            document.getElementById('size-' + row_id).innerHTML = torrent["size"];
+            document.getElementById('ratio-' + row_id).innerHTML = torrent["ratio"];
+          }
         }
-      }
-    };
-    xmlHttp.open("GET", "/current-status")
-    xmlHttp.send(null);
+      };
+      xmlHttp.open("GET", "/current-status")
+      xmlHttp.send(null);
+    }
     setTimeout('update_with_current_status()', 5000);
   }
 END_JS
