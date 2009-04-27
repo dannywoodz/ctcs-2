@@ -616,7 +616,7 @@ sub function_to_handle_request
     my $target = $1;
     my $close_after_write = $message =~ /Connection: close/i;
     return writer_function(sub { handle_form_submission($target, $client, $_)},
-			   $close_after_write);
+                           $close_after_write);
   }
   elsif (/^DUMP\s*$/)
   {
@@ -676,7 +676,7 @@ sub handle_send_page
                          -head => style({type => 'text/css'},
                                          stylesheet())),
                                          $page_content,
-					 q(<script type="text/javascript">setTimeout('update_with_current_status()', 5000);</script>),
+                                         q(<script type="text/javascript">setTimeout('update_with_current_status()', 5000);</script>),
                                          end_html();
       }
     };
@@ -827,33 +827,33 @@ sub json_status
   my $torrent_id = shift;
   my $status = IO::String->new();
   print $status sprintf('{ "download": "%s", "upload": "%s", "torrents": [',
-			map { human_readable($_) . '/s' } total_used_bandwidth());
+                        map { human_readable($_) . '/s' } total_used_bandwidth());
   foreach my $client(torrent_clients())
   {
     my $torrent = torrent_handled_by($client);
     printf $status join(', ',
-			('{"id": "%s"',
-			 '"name": "%s"',
-			 '"percent-complete": "%s"',
-			 '"download-rate": "%s"',
-			 '"upload-rate": "%s"',
-			 '"seeders": "%s"',
-			 '"leechers": "%s"',
-			 '"downloaded": "%s"',
-			 '"uploaded": "%s"',
-			 '"size": "%s"',
-			 '"ratio": "%s"}')),
-			 CGI::escape($torrent->{id}),
-			 $torrent->{name},
-			 sprintf('%d%%', $torrent->{percent_complete}),
-			 human_readable($torrent->{download_rate}) . '/s',
-			 human_readable($torrent->{upload_rate}) . '/s',
-			 ($torrent->{active_seeders} . '/' . $torrent->{total_seeders}),
-			 ($torrent->{active_leechers} . '/' . $torrent->{total_leechers}),
-			 human_readable($torrent->{downloaded}, '0.2f'),
-			 human_readable($torrent->{uploaded}, '0.2f'),
-			 human_readable($torrent->{size}, 'd', '0.2f'),
-			 formatted_ratio_for($torrent);
+                        ('{"id": "%s"',
+                         '"name": "%s"',
+                         '"percent-complete": "%s"',
+                         '"download-rate": "%s"',
+                         '"upload-rate": "%s"',
+                         '"seeders": "%s"',
+                         '"leechers": "%s"',
+                         '"downloaded": "%s"',
+                         '"uploaded": "%s"',
+                         '"size": "%s"',
+                         '"ratio": "%s"}')),
+                         CGI::escape($torrent->{id}),
+                         $torrent->{name},
+                         sprintf('%d%%', $torrent->{percent_complete}),
+                         human_readable($torrent->{download_rate}) . '/s',
+                         human_readable($torrent->{upload_rate}) . '/s',
+                         ($torrent->{active_seeders} . '/' . $torrent->{total_seeders}),
+                         ($torrent->{active_leechers} . '/' . $torrent->{total_leechers}),
+                         human_readable($torrent->{downloaded}, '0.2f'),
+                         human_readable($torrent->{uploaded}, '0.2f'),
+                         human_readable($torrent->{size}, 'd', '0.2f'),
+                         formatted_ratio_for($torrent);
   }
   print $status ']}';
   return ${$status->string_ref()};
@@ -1045,7 +1045,7 @@ sub advanced_limits_page
                td($upload_limit_widget),
                td($download_limit_widget),
                td($auto_manage_widget)
-	      );
+              );
     }
     print Tr(td(a({href => '/', title => 'Go to front page'}, 'Home')),
              td({colspan => '2', align => 'right'}, submit(-value => 'Apply Changes')));
@@ -1184,10 +1184,28 @@ sub handle_dump
     print "CTCS\r\n";
     print Dumper(\%ctcs);
     print "READERS\n\n";
-    print Dumper($readers);
-    print "WRITERS\n\n";
-    print Dumper($writers);
-    print "MESSAGES\n\n";
+    map { printf "%s: %s:%d (%s)\n",
+          $_,
+          defined($_->peerport()) ? address_of($_) : 'SERVER',
+          defined($_->peerport()) ? $_->peerport() : $ctcs{port},
+          exists($clients{$_}->{torrent}) ?
+          "TORRENT: " . $clients{$_}->{torrent}->{name} :
+          (!defined($_->peerport())) ?
+          "SERVER" :
+          "WEB"
+        } $readers->handles;
+    print "\nWRITERS\n\n";
+    map { printf "%s: %s:%d (%s)\n",
+          $_,
+          defined($_->peerport()) ? address_of($_) : 'SERVER',
+          defined($_->peerport()) ? $_->peerport() : $ctcs{port},
+          exists($clients{$_}->{torrent}) ?
+          "TORRENT: " . $clients{$_}->{torrent}->{name} :
+          (!defined($_->peerport())) ?
+          "SERVER" :
+          "WEB"
+        } $writers->handles;
+    print "\nMESSAGES\n\n";
     print Dumper(\%clients);
   };
 }
