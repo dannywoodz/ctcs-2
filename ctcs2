@@ -474,11 +474,11 @@ sub reader_function_for
 sub writer_function
 {
   my $handler = shift;
-  my $message = $handler->();
-  my $message_length = length($message);
+  my $close_after_write = shift;
+  my $message = $handler->() || '';
+  my $message_length = defined($message) ? length($message) : 0;
   my $message_offset = 0;
   return sub {
-    return 1 if $message_offset >= $message_length;
     my $client  = shift;
 
     ctcs_log(LOG_DEBUG, "Writing %d bytes of length %d, starting at %d", $message_length - $message_offset, $message_length, $message_offset);
@@ -503,7 +503,7 @@ sub writer_function
     ctcs_log(LOG_DEBUG,
              "Wrote %d bytes, leaving %d remaining. Message is%s finished",
              $written, $message_length - $message_offset, $finished ? "" : " NOT");
-
+    shift(@{$clients{$client}->{messages}}) && deregister_client($client) if $close_after_write && $finished;
     return $finished;
   }
 }
@@ -611,7 +611,10 @@ sub function_to_handle_request
   }
   elsif (/^POST\s+([^\s]+)/)
   {
-    return writer_function(sub { handle_form_submission($1, $client, $_)}, 1 );
+    my $target = $1;
+    my $close_after_write = $message =~ /Connection: close/i;
+    return writer_function(sub { handle_form_submission($target, $client, $_)},
+			   $close_after_write);
   }
   elsif (/^DUMP\s*$/)
   {
