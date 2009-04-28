@@ -930,7 +930,7 @@ sub index_page
       my $ratio            = formatted_ratio_for($torrent);
       my $row_class        = ($count % 2 == 0) ? 'torrent-even' : 'torrent-odd';
       my $red              = ($ratio eq 'Inf.') ? 0 : int((1 - $ratio) * 255);
-      my $green            = ($ratio eq 'Inf.') ? 255 : int($ratio * 255);
+      my $green            = ($ratio eq 'Inf.') ? 255 : int($ratio * 128);
 
       $red = 0 if $red < 0;
       $green = 255 if $ratio > 255;
@@ -1961,7 +1961,7 @@ sub javascript
             {
               ratio = parseFloat(torrent["ratio"]);
               red = 255 - (ratio * 255);  if (red < 0.0) red = 0.0;
-              green = ratio * 255; if (green > 255) green = 255;
+              green = ratio * 128; if (green > 255) green = 255;
             }
             ratio_element.style.color = '#' + ((red << 16) | (green << 8) | 0).toString(16);
           }
