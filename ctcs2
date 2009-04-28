@@ -1115,15 +1115,15 @@ sub ctcs_file_table
 
   return with_output_to_string {
     print CGI::start_table({id => 'files'});
-    print Tr(th('File'), th('Size (bytes)'), th('% Complete'));
+    print Tr(th('File'), th('Size'), th('% Complete'));
 
     for (my $count = 1; $count < scalar @files; $count++)
     {
       my $file = $files[$count];
       print Tr({class => ($count % 2 == 1) ? 'file-even' : 'file-odd'},
                td($count, ': ', $file->{name}),
-               td({class => 'numeric'}, $file->{size}),
-               td({class => 'numeric'}, int($file->{percent_done})));
+               td({align => 'right'}, human_readable($file->{size})),
+               td({align => 'right'}, int($file->{percent_done}), '%'));
     }
     print CGI::end_table();
   }
