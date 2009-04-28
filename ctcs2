@@ -2046,11 +2046,11 @@ END_JS
 sub stylesheet
 {
   my $sheet = <<END_CSS;
-body { font-family: Arial, sans-serif; margin-left: 10%; margin-right: 10%; margin-top: 5%; margin-bottom: 5%; }
+body { font-family: Arial, sans-serif; margin-left: 5%; margin-right: 5%; margin-top: 0%; margin-bottom: 5%; }
 #title { text-align: center; }
 .torrent-even, .peer-even, .file-even { background-color: #ded; }
 .torrent-odd, .peer-odd, .file-odd, div#global-bandwidth-limits { background-color: #efe; }
-div#global-bandwidth-limits { width: 100%; padding: 1em; }
+div#global-bandwidth-limits { width: 100%; padding-top: 1em; padding-bottom: 1em; }
 div#global-bandwidth-limits table { margin-left: auto; margin-right: auto; }
 div#global-bandwidth-limits table th { text-align: left; }
 table#torrents { margin-top: 3em; }
