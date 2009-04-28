@@ -935,7 +935,7 @@ sub index_page
       $red = 0 if $red < 0;
       $green = 255 if $ratio > 255;
 
-      my $row_colour       = sprintf('#%6x', ($red << 16 | $green << 8 | 0));
+      my $row_colour       = sprintf('#%06x', ($red << 16 | $green << 8 | 0));
       my $pause_unpause = $torrent->{config}->{pause}->{value} == 1 ? "Resume" : "Pause";
 
       $torrent->{config}->{pause}->{value} == 1 && ($row_class .= ' paused');
