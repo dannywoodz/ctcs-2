@@ -1188,24 +1188,16 @@ sub handle_dump
     print "\nREADERS\n\n";
     map { printf "%s: %s:%d (%s)\n",
           $_,
-          defined($_->peerport()) ? address_of($_) : 'SERVER',
-          defined($_->peerport()) ? $_->peerport() : $ctcs{port},
-          exists($clients{$_}->{torrent}) ?
-          "TORRENT: " . $clients{$_}->{torrent}->{name} :
-          (!defined($_->peerport())) ?
-          "SERVER" :
-          "WEB"
+          $_ == $server ? "SERVER" : address_of($_),
+          $_ == $server ? $ctcs{port} : $_->peerport(),
+          $_ == $server ? "SERVER" : exists($clients{$_}->{torrent}) ? "TORRENT: " . $clients{$_}->{torrent}->{name} : "WEB"
         } $readers->handles;
     print "\nWRITERS\n\n";
     map { printf "%s: %s:%d (%s)\n",
           $_,
-          defined($_->peerport()) ? address_of($_) : 'SERVER',
-          defined($_->peerport()) ? $_->peerport() : $ctcs{port},
-          exists($clients{$_}->{torrent}) ?
-          "TORRENT: " . $clients{$_}->{torrent}->{name} :
-          (!defined($_->peerport())) ?
-          "SERVER" :
-          "WEB"
+          $_ == $server ? "SERVER" : address_of($_),
+          $_ == $server ? $ctcs{port} : $_->peerport(),
+          $_ == $server ? "SERVER" : exists($clients{$_}->{torrent}) ? "TORRENT: " . $clients{$_}->{torrent}->{name} : "WEB"
         } $writers->handles;
     print "\nMESSAGES\n\n";
     print Dumper(\%clients);
