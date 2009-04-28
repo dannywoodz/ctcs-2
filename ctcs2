@@ -616,8 +616,7 @@ sub function_to_handle_request
   {
     my $target = $1;
     my $close_after_write = $message =~ /Connection: close/i;
-    return writer_function(sub { handle_form_submission($target, $client, $_)},
-                           $close_after_write);
+    return writer_function(sub { handle_form_submission($target, $client, $_)}, 1);
   }
   elsif (/^DUMP\s*$/)
   {
