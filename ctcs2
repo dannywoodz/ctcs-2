@@ -212,6 +212,7 @@ $ctcs{log_timestamps}       = !$suppress_log_timestamps;
 $ctcs{log_level}            = LOG_INFO;
 $ctcs{log_file_handle}      = \*STDOUT;
 $ctcs{form_encoding}        = 'application/x-www-form-urlencoded';
+$ctcs{auto_refresh}         = 1;
 
 ctcs_log(LOG_INFO, "CTCS Server started on port $port");
 
@@ -475,11 +476,10 @@ sub writer_function
 {
   my $handler = shift;
   my $close_after_write = shift;
-  my $message = $handler->();
-  my $message_length = length($message);
+  my $message = $handler->() || '';
+  my $message_length = defined($message) ? length($message) : 0;
   my $message_offset = 0;
   return sub {
-    return 1 if $message_offset >= $message_length;
     my $client  = shift;
 
     ctcs_log(LOG_DEBUG, "Writing %d bytes of length %d, starting at %d", $message_length - $message_offset, $message_length, $message_offset);
@@ -504,8 +504,7 @@ sub writer_function
     ctcs_log(LOG_DEBUG,
              "Wrote %d bytes, leaving %d remaining. Message is%s finished",
              $written, $message_length - $message_offset, $finished ? "" : " NOT");
-
-    shift(@{$clients{$client}->{messages}}) && deregister_client($client) if ($finished && $close_after_write);
+    shift(@{$clients{$client}->{messages}}) && deregister_client($client) if $close_after_write && $finished;
     return $finished;
   }
 }
@@ -609,11 +608,16 @@ sub function_to_handle_request
   }
   elsif (/^GET\s+([^\s]+)/)
   {
-    return writer_function(sub { handle_send_page($1, $client) }, 1);
+    my $target = $1;
+    my $close_after_write = $message =~ /Connection: close/i;
+    return writer_function(sub { handle_send_page($target, $client) }, $close_after_write);
   }
   elsif (/^POST\s+([^\s]+)/)
   {
-    return writer_function(sub { handle_form_submission($1, $client, $_)}, 1 );
+    my $target = $1;
+    my $close_after_write = $message =~ /Connection: close/i;
+    return writer_function(sub { handle_form_submission($target, $client, $_)},
+                           $close_after_write);
   }
   elsif (/^DUMP\s*$/)
   {
@@ -637,7 +641,10 @@ sub with_output_to_string(&)
   my $function = shift;
   my $string = IO::String->new();
   my $oldfd = select $string;
+  my $oldflush = $|;
+  $| = 1;
   eval { $function->() };
+  $| = $oldflush;
   select $oldfd;
   die $@ if $@;
   return ${$string->string_ref()};
@@ -653,16 +660,25 @@ sub handle_send_page
   my ($location, $client) = @_;
   my $response_code;
   my $page;
-  my $page_content = page_content($location);
+  my $plain = 0;
+  my $page_content = page_content($location, \$plain);
 
   if ($page_content)
   {
     $page = with_output_to_string {
-      print start_html(-title => 'CTCS 2',
-                       -head  => style({type => 'text/css'},
-                                       stylesheet())),
-                                       $page_content,
-                                       end_html();
+      if ($plain)
+      {
+        print $page_content;
+      }
+      else
+      {
+        print start_html(-title => 'CTCS 2',
+                         -script => javascript(),
+                         -head => style({type => 'text/css'},
+                                         stylesheet())),
+                                         $page_content,
+                                         end_html();
+      }
     };
     $response_code = '200 OK';
   }
@@ -678,8 +694,7 @@ sub handle_send_page
 
   return sprintf("HTTP/1.1 %s\r\n%s%s",
                  $response_code,
-                 header({connection     => 'close',
-                         content_length => length($page)}),
+                 header({content_length => length($page)}),
                  $page);
 }
 
@@ -694,12 +709,15 @@ sub handle_form_submission
   {
     my $upload_limit              =  $query->param('ulimit');
     my $download_limit            =  $query->param('dlimit');
+    my $auto_refresh              =  $query->param('auto-refresh');
     $ctcs{download_limit}         =  (int($download_limit) * 1024) if defined $download_limit;
     $ctcs{upload_limit}           =  (int($upload_limit) * 1024) if defined $upload_limit;
+    $ctcs{auto_refresh}           =  ($auto_refresh && int($auto_refresh)) || 0;
     autobalance_bandwidth();
     return with_output_to_string {
       print "HTTP/1.1 302 Found\r\n";
       print $query->redirect(-uri => '/');
+      print "\r\n";
     }
   }
   elsif ($target eq "/status-action")
@@ -791,12 +809,59 @@ sub handle_form_submission
 
 sub page_content
 {
-  my $page = shift;
+  my ($page, $plain_ref) = @_;
+
+  if ($page eq '/current-status')
+  {
+    $$plain_ref = 1;
+    return json_status();
+  }
+
   return index_page() if $page eq "/";
   return torrent_info_page($1) if $page =~ /^\/?torrent\/(.+)$/;
   return advanced_limits_page() if $page eq '/advanced-limits';
   return debug_page() if $page eq "/debug";
   return undef;
+}
+
+sub json_status
+{
+  my $torrent_id = shift;
+  my $status = IO::String->new();
+  print $status sprintf('{ "download": "%s", "upload": "%s", "torrents": [',
+                        map { human_readable($_) . '/s' } total_used_bandwidth());
+
+  printf $status join(',',
+		      map {
+			my $torrent = torrent_handled_by($_);
+			sprintf(join(', ',
+				     ('{"id": "%s"',
+				      '"name": "%s"',
+				      '"percent-complete": "%s"',
+              '"time_remaining": "%s"',
+				      '"download-rate": "%s"',
+				      '"upload-rate": "%s"',
+				      '"seeders": "%s"',
+				      '"leechers": "%s"',
+				      '"downloaded": "%s"',
+				      '"uploaded": "%s"',
+				      '"size": "%s"',
+				      '"ratio": "%s"}')),
+				(CGI::escape($torrent->{id}),
+				 $torrent->{name},
+				 sprintf('%d%%', $torrent->{percent_complete}),
+         calculate_time_remaining($torrent->{downloaded_chunks}, $torrent->{total_chunks}, $torrent->{piece_size}, $torrent->{smoothed_dl_rate}),
+				 human_readable($torrent->{download_rate}) . '/s',
+				 human_readable($torrent->{upload_rate}) . '/s',
+				 ($torrent->{active_seeders} . '/' . $torrent->{total_seeders}),
+				 ($torrent->{active_leechers} . '/' . $torrent->{total_leechers}),
+				 human_readable($torrent->{downloaded}, '0.2f'),
+				 human_readable($torrent->{uploaded}, '0.2f'),
+				 human_readable($torrent->{size}, 'd', '0.2f'),
+				 formatted_ratio_for($torrent)))
+		      } torrent_clients());
+  print $status ']}';
+  return ${$status->string_ref()};
 }
 
 ###############################################################################
@@ -817,7 +882,7 @@ sub human_readable_time
 # Calculate the time remaining for a given download rate and chunk data.
 ###############################################################################
 
-sub calculate_time_remainig
+sub calculate_time_remaining
 {
  my $downloaded_chunks = shift;
  my $total_chunks      = shift;
@@ -865,6 +930,13 @@ sub index_page
                     Tr(th('Current Upload Bandwidth:'), td({class => 'numeric', id => 'upload-bandwidth'}, $current_upload_field . '/s')),
                     Tr(th('Global Download Limit:'), td($download_field, ' KB/s')),
                     Tr(th('Global Upload Limit:'), td($upload_field, ' KB/s')),
+		    Tr(th('Auto-Refresh:'),
+		       td({class => 'numeric'},
+			  checkbox(-name    => 'auto-refresh',
+				   -label   => '',
+				   -value   => '1',
+				   -id      => 'auto-refresh',
+				   -checked => $ctcs{auto_refresh}))),
                     Tr(td(a({href  => '/advanced-limits',
                              title => 'Fine-grained control over bandwidth limits'},
                             'Advanced Limits')),
@@ -876,7 +948,7 @@ sub index_page
              th('Seeds'), th('Leeches'), th('Downloaded'), th('Uploaded'),
              th('Size'), th('Ratio'), th('Action'));
 
-    my @torrent_info           =  sort {
+    my @torrent_info = sort {
       ($b->{percent_complete} || 0) <=> ($a->{percent_complete} || 0)
     } map { torrent_handled_by($_) } torrent_clients();
 
@@ -907,14 +979,11 @@ sub index_page
 
       $smoothed_dl_rate= $smoothed_dl_rate/$dl_count if $smoothed_dl_rate > 0;
 
-      ctcs_log(LOG_WARNING, "Smoothed download rate: $smoothed_dl_rate");
-
-      my $time_to_finish   = calculate_time_remainig($torrent->{downloaded_chunks}, $torrent->{total_chunks}, $torrent->{piece_size}, $smoothed_dl_rate);
+      my $time_to_finish   = calculate_time_remaining($torrent->{downloaded_chunks}, $torrent->{total_chunks}, $torrent->{piece_size}, $smoothed_dl_rate);
       my $raw_ratio        = ($torrent->{uploaded} == 0) ? 0 :
       ($torrent->{downloaded} == 0) ? 'Inf.' :
       $torrent->{uploaded} / $torrent->{downloaded};
-      my $ratio  = ($raw_ratio eq 'Inf.') ? 'Inf.' :
-      sprintf("%.02f", $raw_ratio);
+      my $ratio            = formatted_ratio_for($torrent);
       my $row_class        = ($count % 2 == 0) ? 'torrent-even' : 'torrent-odd';
       my $ratio_class      = ($ratio eq 'Inf.' || $ratio >= 2) ?
       'excellent-ratio' : ($ratio >= 1) ?
@@ -922,31 +991,43 @@ sub index_page
       'ok-ratio' : 'poor-ratio';
 
       my $pause_unpause = $torrent->{config}->{pause}->{value} == 1 ? "Resume" : "Pause";
-      $torrent->{config}->{pause}->{value} == 1 && ($row_class .= ' paused');
 
-      print Tr({class => $row_class},
-               td($torrent_link),
-               td({class => 'numeric'}, $percent_complete),
-               td({class => 'numeric'}, $time_to_finish),
-               td({class => 'numeric'}, $download_rate, '/s'),
-               td({class => 'numeric'}, $upload_rate, '/s'),
-               td({class => 'numeric'}, $active_seeders, '/', $total_seeders),
-               td({class => 'numeric'}, $active_leechers, '/', $total_leechers),
-               td({class => 'numeric'}, $downloaded),
-               td({class => 'numeric'}, $uploaded),
-               td({class => 'numeric'}, $size),
-               td({class => "numeric $ratio_class"}, $ratio),
-               td(sprintf('<form name="$torrent_id" method="post" action="/status-action" enctype="%s">', $ctcs{form_encoding}),
-                  Select({name => 'action'},
-                         option({value => $pause_unpause}, $pause_unpause),
-                         option({value => 'Update'}, 'Update'),
-                         option({value => 'Quit'}, 'Quit')),
-                  submit(-name => 'submit', -value => 'Ok'),
-                  hidden(-name => 'torrent-id', -value => $torrent_id),
-                  end_form()));
+      $torrent->{config}->{pause}->{value} == 1 && ($row_class .= ' paused');
+      print Tr({class => $row_class,
+		id    => $torrent_id},
+	       td($torrent_link),
+	       td({class => 'numeric', id => "percent_complete-$torrent_id"}, $percent_complete),
+         td({class => 'numeric', id => "time_remaining-$torrent_id"}, $time_to_finish),
+	       td({class => 'numeric', id => "download_rate-$torrent_id"}, $download_rate . '/s'),
+	       td({class => 'numeric', id => "upload_rate-$torrent_id"}, $upload_rate . '/s'),
+	       td({class => 'numeric', id => "seeders-$torrent_id"}, $active_seeders, '/', $total_seeders),
+	       td({class => 'numeric', id => "leechers-$torrent_id"}, $active_leechers, '/', $total_leechers),
+	       td({class => 'numeric', id => "downloaded-$torrent_id"}, $downloaded),
+	       td({class => 'numeric', id => "uploaded-$torrent_id"}, $uploaded),
+	       td({class => 'numeric', id => "size-$torrent_id"}, $size),
+	       td({class => "numeric $ratio_class", id => "ratio-$torrent_id"}, $ratio),
+	       td(sprintf('<form name="$torrent_id" method="post" action="/status-action" enctype="%s">',
+			  $ctcs{form_encoding}),
+		  Select({name         => 'action'},
+			 option({value => $pause_unpause}, $pause_unpause),
+			 option({value => 'Update'}, 'Update'),
+			 option({value => 'Quit'}, 'Quit')),
+		  submit(-name         => 'submit', -value => 'Ok'),
+		  hidden(-name         => 'torrent-id', -value => $torrent_id),
+		  end_form()));
     }
     print CGI::end_table();
+    print q(<script type="text/javascript">setTimeout('update_with_current_status()', 5000);</script>);
   };
+}
+
+sub formatted_ratio_for
+{
+  my $torrent = shift;
+  my $raw_ratio        = ($torrent->{uploaded} == 0) ? 0 :
+  ($torrent->{downloaded} == 0) ? 'Inf.' :
+  $torrent->{uploaded} / $torrent->{downloaded};
+  return ($raw_ratio eq 'Inf.') ? 'Inf.' : sprintf("%.02f", $raw_ratio);
 }
 
 ###############################################################################
@@ -1018,7 +1099,7 @@ sub advanced_limits_page
                td($upload_limit_widget),
                td($download_limit_widget),
                td($auto_manage_widget)
-	      );
+              );
     }
     print Tr(td(a({href => '/', title => 'Go to front page'}, 'Home')),
              td({colspan => '2', align => 'right'}, submit(-value => 'Apply Changes')));
@@ -1154,13 +1235,26 @@ sub error_page
 sub handle_dump
 {
   return with_output_to_string {
-    print "CTCS\r\n";
-    print Dumper(\%ctcs);
-    print "READERS\n\n";
-    print Dumper($readers);
-    print "WRITERS\n\n";
-    print Dumper($writers);
-    print "MESSAGES\n\n";
+    print "CTCS\n\n";
+    while(my ($key, $value) = each %ctcs)
+    {
+      printf "%s: %s\n", $key, $value;
+    }
+    print "\nREADERS\n\n";
+    map { printf "%s: %s:%d (%s)\n",
+          $_,
+          $_ == $server ? "SERVER" : address_of($_),
+          $_ == $server ? $ctcs{port} : $_->peerport(),
+          $_ == $server ? "SERVER" : exists($clients{$_}->{torrent}) ? "TORRENT: " . $clients{$_}->{torrent}->{name} : "WEB"
+        } $readers->handles;
+    print "\nWRITERS\n\n";
+    map { printf "%s: %s:%d (%s)\n",
+          $_,
+          $_ == $server ? "SERVER" : address_of($_),
+          $_ == $server ? $ctcs{port} : $_->peerport(),
+          $_ == $server ? "SERVER" : exists($clients{$_}->{torrent}) ? "TORRENT: " . $clients{$_}->{torrent}->{name} : "WEB"
+        } $writers->handles;
+    print "\nMESSAGES\n\n";
     print Dumper(\%clients);
   };
 }
@@ -1179,6 +1273,17 @@ sub record_bandwidth
   push(@dl_hist, $dlrate);
   shift @dl_hist if $#dl_hist > 100;
   @{$info->{download_rate_history}}= @dl_hist;
+
+  my $smoothed_dl_rate= 0;
+  my $dl_count= $#dl_hist;
+
+  for(my $i= 0; $i < $dl_count; $i++)
+  {
+    $smoothed_dl_rate += $dl_hist[$i];
+  }
+
+  $info->{smoothed_dl_rate}= $dl_count == 0 ? 0 : $smoothed_dl_rate/$dl_count;
+
   my $total = exists($info->{total_chunks}) ? $info->{total_chunks} : 0;
   my $downloaded = exists($info->{downloaded_chunks}) ? $info->{downloaded_chunks} : 0;
   $info->{percent_complete} = $total == 0 ?
@@ -1212,6 +1317,7 @@ sub handle_register_torrent
   $info->{available_chunks}      = 0;
   $info->{download_rate}         = 0;
   $info->{download_rate_history} = [];
+  $info->{smoothed_dl_rate}      = 0;
   $info->{upload_rate}           = 0;
   $info->{downloaded}            = 0;
   $info->{uploaded}              = 0;
@@ -1853,6 +1959,74 @@ sub peer_count_for
 {
   my $info = torrent_handled_by(shift);
   return scalar @{$info->{peers}}
+}
+
+sub javascript
+{
+  my $script=<<END_JS;
+  var xmlHttp = null;
+
+  function ajaxObject()
+  {
+    if (xmlHttp) return xmlHttp;
+    try {
+      // Firefox, Opera 8.0+, Safari
+      xmlHttp=new XMLHttpRequest();
+    }
+    catch (e) {
+      // Internet Explorer
+      try {
+        xmlHttp=new ActiveXObject("Msxml2.XMLHTTP");
+      }
+      catch (e) {
+        try {
+          xmlHttp=new ActiveXObject("Microsoft.XMLHTTP");
+        }
+        catch (e) {
+          alert("Your browser does not support AJAX!");
+          return false;
+        }
+      }
+    }
+    return xmlHttp;
+  }
+
+  function update_with_current_status()
+  {
+    var xmlHttp = ajaxObject();
+
+    if(!xmlHttp) return;
+
+    if (document.getElementById('auto-refresh').checked)
+    {
+      xmlHttp.onreadystatechange = function() {
+        if (xmlHttp.readyState == 4 && xmlHttp.responseText) {
+          data = eval('(' + xmlHttp.responseText + ')');
+          document.getElementById('download-bandwidth').innerHTML = data["download"];
+          document.getElementById('upload-bandwidth').innerHTML = data["upload"];
+          var torrent_data = data["torrents"];
+          for (var i = 0; i < torrent_data.length; i++) {
+            var torrent = torrent_data[i];
+            var row_id = torrent["id"];
+            document.getElementById('percent_complete-' + row_id).innerHTML = torrent["percent-complete"];
+            document.getElementById('time_remaining-' + row_id).innerHTML = torrent["time_remaining"];
+            document.getElementById('download_rate-' + row_id).innerHTML = torrent["download-rate"];
+            document.getElementById('upload_rate-' + row_id).innerHTML = torrent["upload-rate"];
+            document.getElementById('seeders-' + row_id).innerHTML = torrent["seeders"];
+            document.getElementById('leechers-' + row_id).innerHTML = torrent["leechers"];
+            document.getElementById('downloaded-' + row_id).innerHTML = torrent["downloaded"];
+            document.getElementById('uploaded-' + row_id).innerHTML = torrent["uploaded"];
+            document.getElementById('size-' + row_id).innerHTML = torrent["size"];
+            document.getElementById('ratio-' + row_id).innerHTML = torrent["ratio"];
+          }
+        }
+      };
+      xmlHttp.open("GET", "/current-status")
+      xmlHttp.send(null);
+    }
+    setTimeout('update_with_current_status()', 5000);
+  }
+END_JS
 }
 
 ###############################################################################
