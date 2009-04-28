@@ -929,11 +929,13 @@ sub index_page
       my $percent_complete = sprintf('%d%%', $torrent->{percent_complete});
       my $ratio            = formatted_ratio_for($torrent);
       my $row_class        = ($count % 2 == 0) ? 'torrent-even' : 'torrent-odd';
-      my $ratio_class      = ($ratio eq 'Inf.' || $ratio >= 2) ?
-      'excellent-ratio' : ($ratio >= 1) ?
-      'good-ratio' : ($ratio >= 0.5) ?
-      'ok-ratio' : 'poor-ratio';
+      my $red              = ($ratio eq 'Inf.') ? 0 : int((1 - $ratio) * 255);
+      my $green            = ($ratio eq 'Inf.') ? 255 : int($ratio * 255);
 
+      $red = 0 if $red < 0;
+      $green = 255 if $ratio > 255;
+
+      my $row_colour       = sprintf('#%6x', ($red << 16 | $green << 8 | 0));
       my $pause_unpause = $torrent->{config}->{pause}->{value} == 1 ? "Resume" : "Pause";
 
       $torrent->{config}->{pause}->{value} == 1 && ($row_class .= ' paused');
@@ -949,7 +951,7 @@ sub index_page
 	       td({class => 'numeric', id => "downloaded-$torrent_id"}, $downloaded),
 	       td({class => 'numeric', id => "uploaded-$torrent_id"}, $uploaded),
 	       td({class => 'numeric', id => "size-$torrent_id"}, $size),
-	       td({class => "numeric $ratio_class", id => "ratio-$torrent_id"}, $ratio),
+	       td({class => "numeric", style => "color: $row_colour", id => "ratio-$torrent_id"}, $ratio),
 	       td(sprintf('<form name="$torrent_id" method="post" action="/status-action" enctype="%s">',
 			  $ctcs{form_encoding}),
 		  Select({name         => 'action'},
@@ -1935,6 +1937,11 @@ sub javascript
           for (var i = 0; i < torrent_data.length; i++) {
             var torrent = torrent_data[i];
             var row_id = torrent["id"];
+            var ratio_element;
+            var ratio_colour;
+            var ratio;
+            var green;
+            var red;
             document.getElementById('percent_complete-' + row_id).innerHTML = torrent["percent-complete"];
             document.getElementById('download_rate-' + row_id).innerHTML = torrent["download-rate"];
             document.getElementById('upload_rate-' + row_id).innerHTML = torrent["upload-rate"];
@@ -1943,7 +1950,20 @@ sub javascript
             document.getElementById('downloaded-' + row_id).innerHTML = torrent["downloaded"];
             document.getElementById('uploaded-' + row_id).innerHTML = torrent["uploaded"];
             document.getElementById('size-' + row_id).innerHTML = torrent["size"];
-            document.getElementById('ratio-' + row_id).innerHTML = torrent["ratio"];
+            ratio_element = document.getElementById('ratio-' + row_id)
+            ratio_element.innerHTML = torrent["ratio"];
+            if (torrent["ratio"] == "Inf.")
+            {
+              red = 0;
+              green = 255;
+            }
+            else
+            {
+              ratio = parseFloat(torrent["ratio"]);
+              red = 255 - (ratio * 255);  if (red < 0.0) red = 0.0;
+              green = ratio * 255; if (green > 255) green = 255;
+            }
+            ratio_element.style.color = '#' + ((red << 16) | (green << 8) | 0).toString(16);
           }
         }
       };
