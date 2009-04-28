@@ -674,9 +674,9 @@ sub handle_send_page
         print start_html(-title => 'CTCS 2',
                          -script => javascript(),
                          -head => style({type => 'text/css'},
-                                         stylesheet())),
-                                         $page_content,
-                                         end_html();
+                                        stylesheet())),
+                                        $page_content,
+                                        end_html();
       }
     };
     $response_code = '200 OK';
@@ -831,34 +831,34 @@ sub json_status
                         map { human_readable($_) . '/s' } total_used_bandwidth());
 
   printf $status join(',',
-		      map {
-			my $torrent = torrent_handled_by($_);
-			sprintf(join(', ',
-				     ('{"id": "%s"',
-				      '"name": "%s"',
-				      '"percent-complete": "%s"',
-              '"time_remaining": "%s"',
-				      '"download-rate": "%s"',
-				      '"upload-rate": "%s"',
-				      '"seeders": "%s"',
-				      '"leechers": "%s"',
-				      '"downloaded": "%s"',
-				      '"uploaded": "%s"',
-				      '"size": "%s"',
-				      '"ratio": "%s"}')),
-				(CGI::escape($torrent->{id}),
-				 $torrent->{name},
-				 sprintf('%d%%', $torrent->{percent_complete}),
-         calculate_time_remaining($torrent->{downloaded_chunks}, $torrent->{total_chunks}, $torrent->{piece_size}, $torrent->{smoothed_dl_rate}),
-				 human_readable($torrent->{download_rate}) . '/s',
-				 human_readable($torrent->{upload_rate}) . '/s',
-				 ($torrent->{active_seeders} . '/' . $torrent->{total_seeders}),
-				 ($torrent->{active_leechers} . '/' . $torrent->{total_leechers}),
-				 human_readable($torrent->{downloaded}, '0.2f'),
-				 human_readable($torrent->{uploaded}, '0.2f'),
-				 human_readable($torrent->{size}, 'd', '0.2f'),
-				 formatted_ratio_for($torrent)))
-		      } torrent_clients());
+                      map {
+                        my $torrent = torrent_handled_by($_);
+                        sprintf(join(', ',
+                                     ('{"id": "%s"',
+                                      '"name": "%s"',
+                                      '"percent-complete": "%s"',
+                                      '"time_remaining": "%s"',
+                                      '"download-rate": "%s"',
+                                      '"upload-rate": "%s"',
+                                      '"seeders": "%s"',
+                                      '"leechers": "%s"',
+                                      '"downloaded": "%s"',
+                                      '"uploaded": "%s"',
+                                      '"size": "%s"',
+                                      '"ratio": "%s"}')),
+                                (CGI::escape($torrent->{id}),
+                                 $torrent->{name},
+                                 sprintf('%d%%', $torrent->{percent_complete}),
+                                 calculate_time_remaining($torrent->{downloaded_chunks}, $torrent->{total_chunks}, $torrent->{piece_size}, $torrent->{smoothed_dl_rate}),
+                                 human_readable($torrent->{download_rate}) . '/s',
+                                 human_readable($torrent->{upload_rate}) . '/s',
+                                 ($torrent->{active_seeders} . '/' . $torrent->{total_seeders}),
+                                 ($torrent->{active_leechers} . '/' . $torrent->{total_leechers}),
+                                 human_readable($torrent->{downloaded}, '0.2f'),
+                                 human_readable($torrent->{uploaded}, '0.2f'),
+                                 human_readable($torrent->{size}, 'd', '0.2f'),
+                                 formatted_ratio_for($torrent)))
+                      } torrent_clients());
   print $status ']}';
   return ${$status->string_ref()};
 }
@@ -869,12 +869,12 @@ sub json_status
 
 sub human_readable_time
 {
- my $seconds = shift;
- my $minutes = ($seconds/60) % 60;
- my $hours   = ($seconds/3600);
- $seconds    =  $seconds % 60;
+  my $seconds = shift;
+  my $minutes = ($seconds/60) % 60;
+  my $hours   = ($seconds/3600);
+  $seconds    =  $seconds % 60;
 
- return sprintf("%d:%02d:%02d", $hours, $minutes, $seconds);
+  return sprintf("%d:%02d:%02d", $hours, $minutes, $seconds);
 }
 
 ###############################################################################
@@ -883,21 +883,20 @@ sub human_readable_time
 
 sub calculate_time_remaining
 {
- my $downloaded_chunks = shift;
- my $total_chunks      = shift;
- my $chunk_size        = shift;
- my $download_rate     = shift;
+  my $downloaded_chunks = shift;
+  my $total_chunks      = shift;
+  my $chunk_size        = shift;
+  my $download_rate     = shift;
 
- if ( $downloaded_chunks && $total_chunks && $chunk_size && $download_rate &&
-      $downloaded_chunks != $total_chunks &&
-      $download_rate > 0 )
- {
-  return human_readable_time((($total_chunks - $downloaded_chunks) * $chunk_size) / $download_rate);
- }
- else
- {
-  return "-";
- }
+  if ( $downloaded_chunks && $total_chunks && $chunk_size && $download_rate &&
+       $downloaded_chunks != $total_chunks &&
+       $download_rate > 0 ) {
+    return human_readable_time((($total_chunks - $downloaded_chunks) * $chunk_size) / $download_rate);
+  }
+  else
+  {
+    return "-";
+  }
 }
 
 ###############################################################################
@@ -929,13 +928,13 @@ sub index_page
                     Tr(th('Current Upload Bandwidth:'), td({class => 'numeric', id => 'upload-bandwidth'}, $current_upload_field . '/s')),
                     Tr(th('Global Download Limit:'), td($download_field, ' KB/s')),
                     Tr(th('Global Upload Limit:'), td($upload_field, ' KB/s')),
-		    Tr(th('Auto-Refresh:'),
-		       td({class => 'numeric'},
-			  checkbox(-name    => 'auto-refresh',
-				   -label   => '',
-				   -value   => '1',
-				   -id      => 'auto-refresh',
-				   -checked => $ctcs{auto_refresh}))),
+                    Tr(th('Auto-Refresh:'),
+                       td({class => 'numeric'},
+                          checkbox(-name    => 'auto-refresh',
+                                   -label   => '',
+                                   -value   => '1',
+                                   -id      => 'auto-refresh',
+                                   -checked => $ctcs{auto_refresh}))),
                     Tr(td(a({href  => '/advanced-limits',
                              title => 'Fine-grained control over bandwidth limits'},
                             'Advanced Limits')),
@@ -966,17 +965,10 @@ sub index_page
       my $uploaded         = human_readable($torrent->{uploaded}, '0.2f');
       my $size             = human_readable($torrent->{size}, 'd', '0.2f');
       my $percent_complete = sprintf('%d%%', $torrent->{percent_complete});
-
       my $smoothed_dl_rate= 0;
-      my @dl_hist= @{$torrent->{download_rate_history}};
-      my $dl_count= $#dl_hist;
 
-      for(my $i= 0; $i < $dl_count; $i++)
-      {
-        $smoothed_dl_rate += $dl_hist[$i];
-      }
-
-      $smoothed_dl_rate= $smoothed_dl_rate/$dl_count if $smoothed_dl_rate > 0;
+      $smoothed_dl_rate += $_ for @{$torrent->{download_rate_history}};
+      $smoothed_dl_rate= $smoothed_dl_rate/$#{$torrent->{download_rate_history}} if $smoothed_dl_rate > 0;
 
       my $time_to_finish   = calculate_time_remaining($torrent->{downloaded_chunks}, $torrent->{total_chunks}, $torrent->{piece_size}, $smoothed_dl_rate);
       my $raw_ratio        = ($torrent->{uploaded} == 0) ? 0 :
@@ -985,7 +977,7 @@ sub index_page
       my $ratio            = formatted_ratio_for($torrent);
       my $row_class        = ($count % 2 == 0) ? 'torrent-even' : 'torrent-odd';
       my $red              = ($ratio eq 'Inf.') ? 0 : int((1 - $ratio) * 255);
-      my $green            = ($ratio eq 'Inf.') ? 255 : int($ratio * 255);
+      my $green            = ($ratio eq 'Inf.') ? 255 : int($ratio * 128);
 
       $red = 0 if $red < 0;
       $green = 255 if $ratio > 255;
@@ -995,27 +987,27 @@ sub index_page
 
       $torrent->{config}->{pause}->{value} == 1 && ($row_class .= ' paused');
       print Tr({class => $row_class,
-		id    => $torrent_id},
-	       td($torrent_link),
-	       td({class => 'numeric', id => "percent_complete-$torrent_id"}, $percent_complete),
-         td({class => 'numeric', id => "time_remaining-$torrent_id"}, $time_to_finish),
-	       td({class => 'numeric', id => "download_rate-$torrent_id"}, $download_rate . '/s'),
-	       td({class => 'numeric', id => "upload_rate-$torrent_id"}, $upload_rate . '/s'),
-	       td({class => 'numeric', id => "seeders-$torrent_id"}, $active_seeders, '/', $total_seeders),
-	       td({class => 'numeric', id => "leechers-$torrent_id"}, $active_leechers, '/', $total_leechers),
-	       td({class => 'numeric', id => "downloaded-$torrent_id"}, $downloaded),
-	       td({class => 'numeric', id => "uploaded-$torrent_id"}, $uploaded),
-	       td({class => 'numeric', id => "size-$torrent_id"}, $size),
-	       td({class => "numeric", style => "color: $row_colour", id => "ratio-$torrent_id"}, $ratio),
-	       td(sprintf('<form name="$torrent_id" method="post" action="/status-action" enctype="%s">',
-			  $ctcs{form_encoding}),
-		  Select({name         => 'action'},
-			 option({value => $pause_unpause}, $pause_unpause),
-			 option({value => 'Update'}, 'Update'),
-			 option({value => 'Quit'}, 'Quit')),
-		  submit(-name         => 'submit', -value => 'Ok'),
-		  hidden(-name         => 'torrent-id', -value => $torrent_id),
-		  end_form()));
+                id    => $torrent_id},
+               td($torrent_link),
+               td({class => 'numeric', id => "percent_complete-$torrent_id"}, $percent_complete),
+               td({class => 'numeric', id => "time_remaining-$torrent_id"}, $time_to_finish),
+               td({class => 'numeric', id => "download_rate-$torrent_id"}, $download_rate . '/s'),
+               td({class => 'numeric', id => "upload_rate-$torrent_id"}, $upload_rate . '/s'),
+               td({class => 'numeric', id => "seeders-$torrent_id"}, $active_seeders, '/', $total_seeders),
+               td({class => 'numeric', id => "leechers-$torrent_id"}, $active_leechers, '/', $total_leechers),
+               td({class => 'numeric', id => "downloaded-$torrent_id"}, $downloaded),
+               td({class => 'numeric', id => "uploaded-$torrent_id"}, $uploaded),
+               td({class => 'numeric', id => "size-$torrent_id"}, $size),
+               td({class => "numeric", style => "color: $row_colour", id => "ratio-$torrent_id"}, $ratio),
+               td(sprintf('<form name="$torrent_id" method="post" action="/status-action" enctype="%s">',
+                          $ctcs{form_encoding}),
+                  Select({name         => 'action'},
+                         option({value => $pause_unpause}, $pause_unpause),
+                         option({value => 'Update'}, 'Update'),
+                         option({value => 'Quit'}, 'Quit')),
+                  submit(-name         => 'submit', -value => 'Ok'),
+                  hidden(-name         => 'torrent-id', -value => $torrent_id),
+                  end_form()));
     }
     print CGI::end_table();
     print q(<script type="text/javascript">setTimeout('update_with_current_status()', 5000);</script>);
@@ -1123,7 +1115,7 @@ sub ctcs_file_table
       my $file = $files[$count];
       print Tr({class => ($count % 2 == 1) ? 'file-even' : 'file-odd'},
                td($count, ': ', $file->{name}),
-               td({align => 'right'}, human_readable($file->{size})),
+               td({align => 'right'}, human_readable($file->{size}, 'd', '.02f')),
                td({align => 'right'}, int($file->{percent_done}), '%'));
     }
     print CGI::end_table();
@@ -1237,7 +1229,7 @@ sub handle_dump
 {
   return with_output_to_string {
     print "CTCS\n\n";
-    while(my ($key, $value) = each %ctcs)
+    while (my ($key, $value) = each %ctcs)
     {
       printf "%s: %s\n", $key, $value;
     }
@@ -1278,7 +1270,7 @@ sub record_bandwidth
   my $smoothed_dl_rate= 0;
   my $dl_count= $#dl_hist;
 
-  for(my $i= 0; $i < $dl_count; $i++)
+  for (my $i= 0; $i < $dl_count; $i++)
   {
     $smoothed_dl_rate += $dl_hist[$i];
   }
@@ -2034,7 +2026,7 @@ sub javascript
             {
               ratio = parseFloat(torrent["ratio"]);
               red = 255 - (ratio * 255);  if (red < 0.0) red = 0.0;
-              green = ratio * 255; if (green > 255) green = 255;
+              green = ratio * 128; if (green > 255) green = 255;
             }
             ratio_element.style.color = '#' + ((red << 16) | (green << 8) | 0).toString(16);
           }
