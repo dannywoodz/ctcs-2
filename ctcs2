@@ -1975,7 +1975,6 @@ sub javascript
           xmlHttp=new ActiveXObject("Microsoft.XMLHTTP");
         }
         catch (e) {
-          alert("Your browser does not support AJAX!");
           return false;
         }
       }
