@@ -2040,22 +2040,22 @@ sub javascript
             }
           }
           // Finally, go through the rows in the table and delete any that are not in the incoming data
-          var table = document.getElementById('torrents');
-          var index = 1; // Exclude the headings
-          while(index < table.rows.length)
-          {
-            var id = table.rows[i].id;
-            var found = 0;
-            for (var i = 0; i < torrent_data.length; i++) if (torrent_data[i]["id"] == id) found = 1;
-            if (!found)
-            {
-              table.deleteRow(index);
-            }
-            else
-            {
-              index++;
-            }
-          }
+           var table = document.getElementById('torrents');
+           var index = 1; // Exclude the headings
+           while(index < table.rows.length)
+           {
+             var id = table.rows[i].id;
+             var found = 0;
+             for (var i = 0; i < torrent_data.length; i++) if (torrent_data[i]["id"] == id) found = 1;
+             if (!found)
+             {
+               table.deleteRow(index);
+             }
+             else
+             {
+               index++;
+             }
+           }
         }
       };
       xmlHttp.open("GET", "/current-status")
@@ -2071,7 +2071,10 @@ sub javascript
     var new_row = torrents_table.insertRow(torrents_table.rows.length);
     new_row.id = torrent["id"];
     new_row.className = (torrents_table.rows.length % 2 == 0) ? 'torrent-odd' : 'torrent-even';
-    new_row.insertCell(0).innerHTML = torrent["name"]; // TODO: this should be an anchor.
+    torrent_link = document.createElement('a');
+    torrent_link.href = '/torrent/' + escape(torrent["id"]);
+    torrent_link.innerHTML = torrent["name"];
+    new_row.insertCell(0).appendChild(torrent_link);
     var fields = ["percent-complete", "time_remaining", "download-rate", "upload-rate",
                   "seeders", "leechers", "downloaded", "uploaded", "size", "ratio"];
     var torrent_id = torrent["id"];
@@ -2083,6 +2086,9 @@ sub javascript
       cell.className = 'numeric';
     }
     var action_form = document.createElement('form');
+    action_form.method = "post";
+    action_form.action = "/status-action";
+    action_form.encoding = 'application/x-www-form-urlencoded';
     var action_select = document.createElement('select');
     action_select.name = 'action';
     var options = ["Pause", "Update", "Quit"];
@@ -2093,11 +2099,17 @@ sub javascript
       option.value = options[i];
       action_select.add(option, null);
     }
-    var hidden  = document.createElement('hidden');
+    var submit_button = document.createElement('input');
+    submit_button.type = 'submit';
+    submit_button.value = 'Ok';
+    submit_button.name = 'submit';
+    var hidden  = document.createElement('input');
+    hidden.type = 'hidden';
     hidden.name = 'torrent-id';
     hidden.value = torrent["id"];
-    action_form.appendChild(action_select);
     action_form.appendChild(hidden);
+    action_form.appendChild(action_select);
+    action_form.appendChild(submit_button);
     var form_cell = new_row.insertCell(fields.length + 1);
     form_cell.appendChild(action_form);
     form_cell.className = 'numeric';
