@@ -716,7 +716,6 @@ sub handle_form_submission
     return with_output_to_string {
       print "HTTP/1.1 302 Found\r\n";
       print $query->redirect(-uri => '/');
-      print "\r\n";
     }
   }
   elsif ($target eq "/status-action")
@@ -1010,6 +1009,7 @@ sub index_page
     }
     print CGI::end_table();
     print q(<script type="text/javascript">setTimeout('update_with_current_status()', 5000);</script>);
+    print q(<input type="button" onClick="javascript:add_new_torrent([])" value="Create Row"/>);
   };
 }
 
@@ -2004,29 +2004,57 @@ sub javascript
             var ratio;
             var green;
             var red;
-            document.getElementById('percent_complete-' + row_id).innerHTML = torrent["percent-complete"];
-            document.getElementById('time_remaining-' + row_id).innerHTML = torrent["time_remaining"];
-            document.getElementById('download_rate-' + row_id).innerHTML = torrent["download-rate"];
-            document.getElementById('upload_rate-' + row_id).innerHTML = torrent["upload-rate"];
-            document.getElementById('seeders-' + row_id).innerHTML = torrent["seeders"];
-            document.getElementById('leechers-' + row_id).innerHTML = torrent["leechers"];
-            document.getElementById('downloaded-' + row_id).innerHTML = torrent["downloaded"];
-            document.getElementById('uploaded-' + row_id).innerHTML = torrent["uploaded"];
-            document.getElementById('size-' + row_id).innerHTML = torrent["size"];
-            ratio_element = document.getElementById('ratio-' + row_id)
-            ratio_element.innerHTML = torrent["ratio"];
-            if (torrent["ratio"] == "Inf.")
+
+            // If the row's already there, update it.
+
+            if (document.getElementById(row_id))
             {
-              red = 0;
-              green = 255;
+              document.getElementById('percent_complete-' + row_id).innerHTML = torrent["percent-complete"];
+              document.getElementById('time_remaining-' + row_id).innerHTML = torrent["time_remaining"];
+              document.getElementById('download_rate-' + row_id).innerHTML = torrent["download-rate"];
+              document.getElementById('upload_rate-' + row_id).innerHTML = torrent["upload-rate"];
+              document.getElementById('seeders-' + row_id).innerHTML = torrent["seeders"];
+              document.getElementById('leechers-' + row_id).innerHTML = torrent["leechers"];
+              document.getElementById('downloaded-' + row_id).innerHTML = torrent["downloaded"];
+              document.getElementById('uploaded-' + row_id).innerHTML = torrent["uploaded"];
+              document.getElementById('size-' + row_id).innerHTML = torrent["size"];
+              ratio_element = document.getElementById('ratio-' + row_id)
+              ratio_element.innerHTML = torrent["ratio"];
+              if (torrent["ratio"] == "Inf.")
+              {
+                red = 0;
+                green = 255;
+              }
+              else
+              {
+                ratio = parseFloat(torrent["ratio"]);
+                red = 255 - (ratio * 255);  if (red < 0.0) red = 0.0;
+                green = ratio * 128; if (green > 255) green = 255;
+              }
+              ratio_element.style.color = '#' + ((red << 16) | (green << 8) | 0).toString(16);
+            }
+            else // the row's not there: create it.
+            {
+              add_new_torrent(torrent);
+              torrent["alive"] = 1;
+            }
+          }
+          // Finally, go through the rows in the table and delete any that are not in the incoming data
+          var table = document.getElementById('torrents');
+          var index = 1; // Exclude the headings
+          while(index < table.rows.length)
+          {
+            var id = table.rows[i].id;
+            var found = 0;
+            for (var i = 0; i < torrent_data.length; i++) if (torrent_data[i]["id"] == id) found = 1;
+            if (!found)
+            {
+              table.deleteRow(index);
             }
             else
             {
-              ratio = parseFloat(torrent["ratio"]);
-              red = 255 - (ratio * 255);  if (red < 0.0) red = 0.0;
-              green = ratio * 128; if (green > 255) green = 255;
+              index++;
             }
-            ratio_element.style.color = '#' + ((red << 16) | (green << 8) | 0).toString(16);
           }
         }
       };
@@ -2034,6 +2062,45 @@ sub javascript
       xmlHttp.send(null);
     }
     setTimeout('update_with_current_status()', 5000);
+  }
+
+  function add_new_torrent(torrent)
+  {
+    var torrents_table = document.getElementById('torrents');
+    var cell_count = torrent.length + 1; // the +1 is for the action form at the end.
+    var new_row = torrents_table.insertRow(torrents_table.rows.length);
+    new_row.id = torrent["id"];
+    new_row.className = (torrents_table.rows.length % 2 == 0) ? 'torrent-odd' : 'torrent-even';
+    new_row.insertCell(0).innerHTML = torrent["name"]; // TODO: this should be an anchor.
+    var fields = ["percent-complete", "time_remaining", "download-rate", "upload-rate",
+                  "seeders", "leechers", "downloaded", "uploaded", "size", "ratio"];
+    var torrent_id = torrent["id"];
+    for (var i = 0; i < fields.length; i++)
+    {
+      var cell = new_row.insertCell(i + 1);
+      cell.id = fields[i] + "-" + torrent_id;
+      cell.innerHTML = torrent[fields[i]];
+      cell.className = 'numeric';
+    }
+    var action_form = document.createElement('form');
+    var action_select = document.createElement('select');
+    action_select.name = 'action';
+    var options = ["Pause", "Update", "Quit"];
+    for (var i = 0; i < options.length; i++)
+    {
+      var option = document.createElement('option');
+      option.text = options[i];
+      option.value = options[i];
+      action_select.add(option, null);
+    }
+    var hidden  = document.createElement('hidden');
+    hidden.name = 'torrent-id';
+    hidden.value = torrent["id"];
+    action_form.appendChild(action_select);
+    action_form.appendChild(hidden);
+    var form_cell = new_row.insertCell(fields.length + 1);
+    form_cell.appendChild(action_form);
+    form_cell.className = 'numeric';
   }
 END_JS
 }
