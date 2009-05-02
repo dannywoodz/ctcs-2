@@ -1305,7 +1305,7 @@ sub handle_register_torrent
   my $info = {};
   $info->{name}                  = $torrent_name;
   $info->{ctorrent_id}           = $torrent_id;
-  $info->{ctcs_id}               = ++$current_id;
+  $info->{ctcs_id}               = 'ctcs-torrent-' . ++$current_id;
   $info->{config}                = { pause => {value => 0}};
   $info->{percent_complete}      = 0;
   $info->{files}                 = [];
