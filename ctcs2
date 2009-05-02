@@ -2156,8 +2156,6 @@ sub javascript
     new_rows.sort(function(a, b) {
       var first_percent = parseInt(a.cells[1].innerHTML);
       var second_percent = parseInt(b.cells[1].innerHTML);
-      dump('First percent ' + first_percent);
-      dump('Second percent ' + second_percent);
       return second_percent - first_percent;
     });
     for (var i = 0; i < new_rows.length; i++) table.rows[i + 1] = new_rows[i];
