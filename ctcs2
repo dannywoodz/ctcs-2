@@ -298,12 +298,14 @@ sub register_new_client
   $client->sockopt(TCP_NODELAY, 1);
   $client->blocking(0);
 
+  $clients{$client} = {};
+  $clients{$client}->{messages} = [];
+
   ctcs_log(LOG_INFO,
            "connection from %s:%d",
            address_of($client),
            $client->peerport());
-  $clients{$client} = {};
-  $clients{$client}->{messages} = [];
+
   $readers->add($client);
 }
 
@@ -329,7 +331,6 @@ sub deregister_client
            (defined($hostname)) ? " from $hostname:$port" : "");
   $readers->remove($client) while $readers->exists($client);
   $writers->remove($client) while $writers->exists($client);
-  $client->shutdown(2);
   $client->close();
   $ctcs{closed_connections}++;
 }
