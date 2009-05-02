@@ -930,13 +930,12 @@ sub index_page
     printf '<form method="post" action="/" enctype="%s">', FORM_ENCODING;
     print div({id => 'global-bandwidth-limits'},
               table(
-                    Tr(th('Current Download Bandwidth:'), td({class => 'numeric', id => 'download-bandwidth'}, $current_download_field . '/s')),
-                    Tr(th('Current Upload Bandwidth:'), td({class => 'numeric', id => 'upload-bandwidth'}, $current_upload_field . '/s')),
+                    Tr(th('Current Download Bandwidth:'), td({id => 'download-bandwidth'}, $current_download_field . '/s')),
+                    Tr(th('Current Upload Bandwidth:'), td({id => 'upload-bandwidth'}, $current_upload_field . '/s')),
                     Tr(th('Global Download Limit:'), td($download_field, ' KB/s')),
                     Tr(th('Global Upload Limit:'), td($upload_field, ' KB/s')),
                     Tr(th('Auto-Refresh:'),
-                       td({class => 'numeric'},
-                          checkbox(-name    => 'auto-refresh',
+                       td(checkbox(-name    => 'auto-refresh',
                                    -label   => '',
                                    -value   => '1',
                                    -id      => 'auto-refresh',
@@ -994,19 +993,18 @@ sub index_page
       $torrent->{config}->{pause}->{value} == 1 && ($row_class .= ' paused');
       print Tr({class => $row_class,
                 id    => $torrent_id},
-               td($torrent_link),
-               td({class => 'numeric', id => "percent_complete-$torrent_id"}, $percent_complete),
-               td({class => 'numeric', id => "time_remaining-$torrent_id"}, $time_to_finish),
-               td({class => 'numeric', id => "download_rate-$torrent_id"}, $download_rate . '/s'),
-               td({class => 'numeric', id => "upload_rate-$torrent_id"}, $upload_rate . '/s'),
-               td({class => 'numeric', id => "seeders-$torrent_id"}, $active_seeders, '/', $total_seeders),
-               td({class => 'numeric', id => "leechers-$torrent_id"}, $active_leechers, '/', $total_leechers),
-               td({class => 'numeric', id => "downloaded-$torrent_id"}, $downloaded),
-               td({class => 'numeric', id => "uploaded-$torrent_id"}, $uploaded),
-               td({class => 'numeric', id => "size-$torrent_id"}, $size),
-               td({class => "numeric", style => "color: $row_colour", id => "ratio-$torrent_id"}, $ratio),
-               td({class => 'numeric'},
-		  sprintf('<form name="$torrent_id" method="post" action="/status-action" enctype="%s">',
+               td({class => 'title'}, $torrent_link),
+               td({id => "percent_complete-$torrent_id"}, $percent_complete),
+               td({id => "time_remaining-$torrent_id"}, $time_to_finish),
+               td({id => "download_rate-$torrent_id"}, $download_rate . '/s'),
+               td({id => "upload_rate-$torrent_id"}, $upload_rate . '/s'),
+               td({id => "seeders-$torrent_id"}, $active_seeders, '/', $total_seeders),
+               td({id => "leechers-$torrent_id"}, $active_leechers, '/', $total_leechers),
+               td({id => "downloaded-$torrent_id"}, $downloaded),
+               td({id => "uploaded-$torrent_id"}, $uploaded),
+               td({id => "size-$torrent_id"}, $size),
+               td({style => "color: $row_colour", id => "ratio-$torrent_id"}, $ratio),
+               td(sprintf('<form name="$torrent_id" method="post" action="/status-action" enctype="%s">',
 			  FORM_ENCODING),
                   Select({name         => 'action'},
                          option({value => $pause_unpause,
@@ -1123,7 +1121,7 @@ sub ctcs_file_table
     {
       my $file = $files[$count];
       print Tr({class => ($count % 2 == 1) ? 'file-even' : 'file-odd'},
-               td($count, ': ', $file->{name}),
+               td({class => 'title'}, $count, ': ', $file->{name}),
                td({align => 'right'}, human_readable($file->{size}, 'd', '.02f')),
                td({align => 'right'}, int($file->{percent_done}), '%'));
     }
@@ -1144,12 +1142,12 @@ sub ctcs_config_table
     for (my $count = 0; $count < scalar @config_options; $count++)
     {
       print Tr({class => ($count % 2 == 0) ? 'peer-even' : 'peer-odd'},
-               td({class => 'numeric'}, $config{$config_options[$count]}->{short_desc}),
-               td({class => 'numeric'}, ctcs_config_table_widget($config_options[$count],
+               td($config{$config_options[$count]}->{short_desc}),
+               td(ctcs_config_table_widget($config_options[$count],
                                                                  $config{$config_options[$count]})),
                td($config{$config_options[$count]}->{long_desc}));
     }
-    print Tr(td(), td({class => 'numeric'}, submit(-value => 'Apply Changes')), td());
+    print Tr(td(), td(submit(-value => 'Apply Changes')), td());
     print CGI::end_table();
     print hidden(-name => 'torrent-id', -value => CGI::escape($torrent_info->{ctcs_id}));
     print end_form();
@@ -1189,13 +1187,13 @@ sub ctcs_peers_table
       my $peer      = $peers[$count];
       print Tr({class => ($count % 2 == 0) ? 'peer-even' : 'peer-odd'},
                td({class => ($peer->{pieces} == $torrent_info->{total_chunks}) ? 'seed' : 'leech'}),
-               td({class => 'numeric'}, $peer->{address}),
-               td({class => 'numeric'}, $peer->{pieces},
+               td($peer->{address}),
+               td($peer->{pieces},
                   sprintf('(%d%%)', int(($peer->{pieces} / $torrent_info->{total_chunks}) * 100))),
-               td({class => 'numeric'}, human_readable($peer->{uploaded})),
-               td({class => 'numeric'}, human_readable($peer->{upload_rate})),
-               td({class => 'numeric'}, human_readable($peer->{downloaded})),
-               td({class => 'numeric'}, human_readable($peer->{download_rate})));
+               td(human_readable($peer->{uploaded})),
+               td(human_readable($peer->{upload_rate})),
+               td(human_readable($peer->{downloaded})),
+               td(human_readable($peer->{download_rate})));
     }
     print CGI::end_table();
   };
@@ -2105,7 +2103,9 @@ sub javascript
     torrent_link = document.createElement('a');
     torrent_link.href = '/torrent/' + escape(torrent["id"]);
     torrent_link.innerHTML = torrent["name"];
-    new_row.insertCell(0).appendChild(torrent_link);
+    var title_cell = new_row.insertCell(0);
+    title_cell.className = 'title';
+    title_cell.appendChild(torrent_link);
     var fields = ["percent_complete", "time_remaining", "download_rate", "upload_rate",
                   "seeders", "leechers", "downloaded", "uploaded", "size", "ratio"];
     var torrent_id = torrent["id"];
@@ -2114,7 +2114,6 @@ sub javascript
       var cell = new_row.insertCell(i + 1);
       cell.id = fields[i] + "-" + torrent_id;
       cell.innerHTML = torrent[fields[i]];
-      cell.className = 'numeric';
     }
     var action_form = document.createElement('form');
     action_form.method = "post";
@@ -2145,7 +2144,6 @@ sub javascript
     action_form.appendChild(submit_button);
     var form_cell = new_row.insertCell(fields.length + 1);
     form_cell.appendChild(action_form);
-    form_cell.className = 'numeric';
   }
 
   function sort_table(table)
@@ -2182,7 +2180,8 @@ table#torrents, table#files, table#peers, table#config {width: 100%; border-coll
 table#files { width: auto; }
 .torrent-even, .peer-even, .file-even { border-width: 1px; border-style: solid; border-color: #cdc; border-top-color: #fff; }
 .torrent-odd, .peer-odd, .file-odd { border-width: 1px; border-style: solid; border-color: #bcb; border-top-color: #efe; }
-td.numeric { text-align: center; }
+td { text-align: center; }
+td.title { text-align: left; }
 #upload-bandwidth, .excellent-ratio { color: #3b3; }
 .good-ratio { color: #292; }
 .ok-ratio { color: #992; }
