@@ -1010,6 +1010,7 @@ sub index_page
       $torrent->{uploaded} / $torrent->{downloaded};
       my $ratio            = formatted_ratio_for($torrent);
       my $row_class        = ($count % 2 == 0) ? 'torrent-even' : 'torrent-odd';
+      $row_class .= ' complete' if $torrent->{percent_complete} == 100;
       my $red              = ($ratio eq 'Inf.') ? 0 : int((1 - $ratio) * 255);
       my $green            = ($ratio eq 'Inf.') ? 255 : int($ratio * 128);
 
@@ -2042,6 +2043,7 @@ sub javascript
           for (var i = 0; i < torrent_data.length; i++) {
             var torrent = torrent_data[i];
             var row_id = torrent["id"];
+            var completed = parseInt(torrent['percent_complete']) == 100;
             var ratio_element;
             var ratio_colour;
             var ratio;
@@ -2054,6 +2056,10 @@ sub javascript
             row = document.getElementById(row_id);
             if (row)
             {
+              if (completed && row.className.search(/complete/) == -1)
+              {
+                row.className += ' complete';
+              }
               document.getElementById('percent_complete-' + row_id).innerHTML = torrent["percent_complete"];
               document.getElementById('time_remaining-' + row_id).innerHTML = torrent["time_remaining"];
               document.getElementById('download_rate-' + row_id).innerHTML = torrent["download_rate"];
@@ -2233,6 +2239,7 @@ td.title { text-align: left; }
 td.seed, td.leech, .paused { filter:alpha(opacity=50); opacity: 0.5; -moz-opacity:0.5; }
 td.seed { width: 1em; background-color: #3b3; }
 td.leech { width: 1em; background-color: #a22; }
+td.complete { font-weight: bold; }
 END_CSS
 }
 __END__
