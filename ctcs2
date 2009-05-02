@@ -836,10 +836,10 @@ sub json_status
                         sprintf(join(', ',
                                      ('{"id": "%s"',
                                       '"name": "%s"',
-                                      '"percent-complete": "%s"',
+                                      '"percent_complete": "%s"',
                                       '"time_remaining": "%s"',
-                                      '"download-rate": "%s"',
-                                      '"upload-rate": "%s"',
+                                      '"download_rate": "%s"',
+                                      '"upload_rate": "%s"',
                                       '"seeders": "%s"',
                                       '"leechers": "%s"',
                                       '"downloaded": "%s"',
@@ -850,7 +850,10 @@ sub json_status
                                 ($torrent->{internal_id},
                                  $torrent->{name},
                                  sprintf('%d%%', $torrent->{percent_complete}),
-                                 calculate_time_remaining($torrent->{downloaded_chunks}, $torrent->{total_chunks}, $torrent->{piece_size}, $torrent->{smoothed_dl_rate}),
+                                 calculate_time_remaining($torrent->{downloaded_chunks},
+							  $torrent->{total_chunks},
+							  $torrent->{piece_size},
+							  $torrent->{smoothed_dl_rate}),
                                  human_readable($torrent->{download_rate}) . '/s',
                                  human_readable($torrent->{upload_rate}) . '/s',
                                  ($torrent->{active_seeders} . '/' . $torrent->{total_seeders}),
@@ -2014,10 +2017,10 @@ sub javascript
             row = document.getElementById(row_id);
             if (row)
             {
-              document.getElementById('percent_complete-' + row_id).innerHTML = torrent["percent-complete"];
+              document.getElementById('percent_complete-' + row_id).innerHTML = torrent["percent_complete"];
               document.getElementById('time_remaining-' + row_id).innerHTML = torrent["time_remaining"];
-              document.getElementById('download_rate-' + row_id).innerHTML = torrent["download-rate"];
-              document.getElementById('upload_rate-' + row_id).innerHTML = torrent["upload-rate"];
+              document.getElementById('download_rate-' + row_id).innerHTML = torrent["download_rate"];
+              document.getElementById('upload_rate-' + row_id).innerHTML = torrent["upload_rate"];
               document.getElementById('seeders-' + row_id).innerHTML = torrent["seeders"];
               document.getElementById('leechers-' + row_id).innerHTML = torrent["leechers"];
               document.getElementById('downloaded-' + row_id).innerHTML = torrent["downloaded"];
@@ -2053,7 +2056,6 @@ sub javascript
             else // the row's not there: create it.
             {
               add_new_torrent(torrent);
-              torrent["alive"] = 1;
             }
           }
           // Finally, go through the rows in the table and delete any that are not in the incoming data
