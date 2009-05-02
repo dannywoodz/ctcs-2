@@ -1125,7 +1125,7 @@ sub advanced_limits_page
                                         !exists($torrent->{manual_upload_limit})
                                        );
       print Tr({class => ($count % 2) == 0 ? 'torrent-even' : 'torrent-odd'},
-               td($torrent->{name}),
+               td({class => 'title'}, $torrent->{name}),
                td($upload_limit_widget),
                td($download_limit_widget),
                td($auto_manage_widget)
