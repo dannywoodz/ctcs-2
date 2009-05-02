@@ -2101,7 +2101,7 @@ sub javascript
     var cell_count = torrent.length + 1; // the +1 is for the action form at the end.
     var new_row = torrents_table.insertRow(torrents_table.rows.length);
     new_row.id = torrent["id"];
-    new_row.className = (torrents_table.rows.length % 2 == 0) ? 'torrent-odd' : 'torrent-even';
+    new_row.className = (torrents_table.rows.length % 2 == 0) ? 'torrent-even' : 'torrent-odd';
     torrent_link = document.createElement('a');
     torrent_link.href = '/torrent/' + escape(torrent["id"]);
     torrent_link.innerHTML = torrent["name"];
