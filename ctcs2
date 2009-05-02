@@ -94,6 +94,7 @@ my $port                    = 8080;
 my $download_limit          = 1000;
 my $upload_limit            = 50;
 my $suppress_log_timestamps = 0;
+my $current_id              = 1;
 my $help                    = undef;
 
 ###############################################################################
@@ -717,7 +718,6 @@ sub handle_form_submission
     return with_output_to_string {
       print "HTTP/1.1 302 Found\r\n";
       print $query->redirect(-uri => '/');
-      print "\r\n";
     }
   }
   elsif ($target eq "/status-action")
@@ -837,20 +837,24 @@ sub json_status
                         sprintf(join(', ',
                                      ('{"id": "%s"',
                                       '"name": "%s"',
-                                      '"percent-complete": "%s"',
+                                      '"percent_complete": "%s"',
                                       '"time_remaining": "%s"',
-                                      '"download-rate": "%s"',
-                                      '"upload-rate": "%s"',
+                                      '"download_rate": "%s"',
+                                      '"upload_rate": "%s"',
                                       '"seeders": "%s"',
                                       '"leechers": "%s"',
                                       '"downloaded": "%s"',
                                       '"uploaded": "%s"',
                                       '"size": "%s"',
-                                      '"ratio": "%s"}')),
-                                (CGI::escape($torrent->{id}),
+                                      '"ratio": "%s"',
+				      '"paused": "%s"}')),
+                                ($torrent->{internal_id},
                                  $torrent->{name},
                                  sprintf('%d%%', $torrent->{percent_complete}),
-                                 calculate_time_remaining($torrent->{downloaded_chunks}, $torrent->{total_chunks}, $torrent->{piece_size}, $torrent->{smoothed_dl_rate}),
+                                 calculate_time_remaining($torrent->{downloaded_chunks},
+							  $torrent->{total_chunks},
+							  $torrent->{piece_size},
+							  $torrent->{smoothed_dl_rate}),
                                  human_readable($torrent->{download_rate}) . '/s',
                                  human_readable($torrent->{upload_rate}) . '/s',
                                  ($torrent->{active_seeders} . '/' . $torrent->{total_seeders}),
@@ -858,7 +862,8 @@ sub json_status
                                  human_readable($torrent->{downloaded}, '0.2f'),
                                  human_readable($torrent->{uploaded}, '0.2f'),
                                  human_readable($torrent->{size}, 'd', '0.2f'),
-                                 formatted_ratio_for($torrent)))
+                                 formatted_ratio_for($torrent),
+				 torrent_is_paused($torrent)))
                       } torrent_clients());
   print $status ']}';
   return ${$status->string_ref()};
@@ -954,8 +959,8 @@ sub index_page
     for (my $count = 0; $count < @torrent_info; $count++)
     {
       my $torrent          = $torrent_info[$count];
-      my $torrent_id       = CGI::escape($torrent->{id});
-      my $torrent_link     = a({href=> "/torrent/" . CGI::escape($torrent->{id})}, $torrent->{name});
+      my $torrent_id       = CGI::escape($torrent->{internal_id});
+      my $torrent_link     = a({href=> "/torrent/" . CGI::escape($torrent->{internal_id})}, $torrent->{name});
       my $upload_rate      = human_readable($torrent->{upload_rate});
       my $download_rate    = human_readable($torrent->{download_rate});
       my $total_seeders    = $torrent->{total_seeders};
@@ -980,8 +985,8 @@ sub index_page
       my $red              = ($ratio eq 'Inf.') ? 0 : int((1 - $ratio) * 255);
       my $green            = ($ratio eq 'Inf.') ? 255 : int($ratio * 128);
 
-      $red = 0 if $red < 0;
-      $green = 255 if $ratio > 255;
+      $red   = 0 if $red < 0;
+      $green = 255 if $ratio eq 'Inf.' || $ratio > 255;
 
       my $row_colour       = sprintf('#%06x', ($red << 16 | $green << 8 | 0));
       my $pause_unpause = $torrent->{config}->{pause}->{value} == 1 ? "Resume" : "Pause";
@@ -1072,7 +1077,7 @@ sub advanced_limits_page
       my $torrent = torrent_handled_by($client);
       my $upload_limit = int(($torrent->{manual_upload_limit} || $torrent->{upload_limit} || 0) / 1024);
       my $download_limit = int(($torrent->{manual_download_limit} || $torrent->{download_limit} || 0) / 1024);
-      my $id = CGI::escape($torrent->{id});
+      my $id = CGI::escape($torrent->{internal_id});
       my $upload_limit_widget = textfield(-name => "upload-$id",
                                           -size => 6,
                                           -value => $upload_limit);
@@ -1142,7 +1147,7 @@ sub ctcs_config_table
     }
     print Tr(td(), td({class => 'numeric'}, submit(-value => 'Apply Changes')), td());
     print CGI::end_table();
-    print hidden(-name => 'torrent-id', -value => CGI::escape($torrent_info->{id}));
+    print hidden(-name => 'torrent-id', -value => CGI::escape($torrent_info->{internal_id}));
     print end_form();
   }
 }
@@ -1296,6 +1301,7 @@ sub handle_register_torrent
   my $info = {};
   $info->{name}                  = $torrent_name;
   $info->{id}                    = $torrent_id;
+  $info->{internal_id}           = ++$current_id;
   $info->{config}                = { pause => {value => 0}};
   $info->{percent_complete}      = 0;
   $info->{files}                 = [];
@@ -1539,7 +1545,7 @@ sub get_torrent_by_id
   foreach my $client (keys %clients)
   {
     if (exists($clients{$client}->{torrent}) &&
-        $clients{$client}->{torrent}->{id} eq $id) {
+        $clients{$client}->{torrent}->{internal_id} eq $id) {
       return $clients{$client}->{torrent};
     }
   }
@@ -1553,7 +1559,7 @@ sub get_client_by_id
   foreach my $client (keys %clients)
   {
     if (exists($clients{$client}->{torrent}) &&
-        $clients{$client}->{torrent}->{id} eq $id) {
+        $clients{$client}->{torrent}->{internal_id} eq $id) {
       return $client;
     }
   }
@@ -1834,7 +1840,7 @@ sub torrent_set_bandwidth_limit
 {
   my ($torrent, $direction, $limit) = @_;
   my $message = ($direction eq 'upload') ? 'U' : 'D';
-  my $client = get_client_by_id($torrent->{id});
+  my $client = get_client_by_id($torrent->{internal_id});
   if ($direction eq 'upload')
   {
     $torrent->{upload_limit} = $limit;
@@ -1859,12 +1865,12 @@ sub torrent_set_bandwidth_limit
 
 sub torrent_quit
 {
-  send_message("CTQUIT\r\n", get_client_by_id((shift)->{id}));
+  send_message("CTQUIT\r\n", get_client_by_id((shift)->{internal_id}));
 }
 
 sub torrent_update
 {
-  send_message("CTUPDATE\r\n", get_client_by_id((shift)->{id}));
+  send_message("CTUPDATE\r\n", get_client_by_id((shift)->{internal_id}));
 }
 
 sub torrent_pause
@@ -1886,7 +1892,7 @@ sub torrent_resume
 sub torrent_set_config
 {
   my ($torrent, $config_option, $value) = @_;
-  my $client = get_client_by_id($torrent->{id});
+  my $client = get_client_by_id($torrent->{internal_id});
   if (!defined($client))
   {
     ctcs_log(LOG_WARNING,
@@ -2005,36 +2011,128 @@ sub javascript
             var ratio;
             var green;
             var red;
-            document.getElementById('percent_complete-' + row_id).innerHTML = torrent["percent-complete"];
-            document.getElementById('time_remaining-' + row_id).innerHTML = torrent["time_remaining"];
-            document.getElementById('download_rate-' + row_id).innerHTML = torrent["download-rate"];
-            document.getElementById('upload_rate-' + row_id).innerHTML = torrent["upload-rate"];
-            document.getElementById('seeders-' + row_id).innerHTML = torrent["seeders"];
-            document.getElementById('leechers-' + row_id).innerHTML = torrent["leechers"];
-            document.getElementById('downloaded-' + row_id).innerHTML = torrent["downloaded"];
-            document.getElementById('uploaded-' + row_id).innerHTML = torrent["uploaded"];
-            document.getElementById('size-' + row_id).innerHTML = torrent["size"];
-            ratio_element = document.getElementById('ratio-' + row_id)
-            ratio_element.innerHTML = torrent["ratio"];
-            if (torrent["ratio"] == "Inf.")
+            var row;
+
+            // If the row's already there, update it.
+
+            row = document.getElementById(row_id);
+            if (row)
             {
-              red = 0;
-              green = 255;
+              document.getElementById('percent_complete-' + row_id).innerHTML = torrent["percent_complete"];
+              document.getElementById('time_remaining-' + row_id).innerHTML = torrent["time_remaining"];
+              document.getElementById('download_rate-' + row_id).innerHTML = torrent["download_rate"];
+              document.getElementById('upload_rate-' + row_id).innerHTML = torrent["upload_rate"];
+              document.getElementById('seeders-' + row_id).innerHTML = torrent["seeders"];
+              document.getElementById('leechers-' + row_id).innerHTML = torrent["leechers"];
+              document.getElementById('downloaded-' + row_id).innerHTML = torrent["downloaded"];
+              document.getElementById('uploaded-' + row_id).innerHTML = torrent["uploaded"];
+              document.getElementById('size-' + row_id).innerHTML = torrent["size"];
+              ratio_element = document.getElementById('ratio-' + row_id)
+              ratio_element.innerHTML = torrent["ratio"];
+              var row_class = row.className;
+              if (data["paused"] == '1' && !row_class.search(/paused/))
+              {
+                row.className += ' paused';
+              }
+              else if (data["paused"] == '0' && row_class.search(/paused/))
+              {
+                row.className = row.className.replace(/\spaused/, '');
+              }
+
+              if (torrent["ratio"] == "Inf.")
+              {
+                red = 0;
+                green = 255;
+              }
+              else
+              {
+                ratio = parseFloat(torrent["ratio"]);
+                red = 255 - (ratio * 255);  if (red < 0.0) red = 0.0;
+                green = ratio * 128; if (green > 255) green = 255;
+              }
+              var colour = '' + ((red << 16) | (green << 8) | 0).toString(16);
+              while(colour.length < 6) colour = '0' + colour;
+              ratio_element.style.color = '#' + colour;
             }
-            else
+            else // the row's not there: create it.
             {
-              ratio = parseFloat(torrent["ratio"]);
-              red = 255 - (ratio * 255);  if (red < 0.0) red = 0.0;
-              green = ratio * 128; if (green > 255) green = 255;
+              add_new_torrent(torrent);
             }
-            ratio_element.style.color = '#' + ((red << 16) | (green << 8) | 0).toString(16);
           }
+          // Finally, go through the rows in the table and delete any that are not in the incoming data
+           var table = document.getElementById('torrents');
+           var index = 1; // Exclude the headings
+           while(index < table.rows.length)
+           {
+             var id = table.rows[i].id;
+             var found = 0;
+             for (var i = 0; i < torrent_data.length; i++) if (torrent_data[i]["id"] == id) found = 1;
+             if (!found)
+             {
+               table.deleteRow(index);
+             }
+             else
+             {
+               index++;
+             }
+           }
         }
       };
       xmlHttp.open("GET", "/current-status")
       xmlHttp.send(null);
     }
     setTimeout('update_with_current_status()', 5000);
+  }
+
+  function add_new_torrent(torrent)
+  {
+    var torrents_table = document.getElementById('torrents');
+    var cell_count = torrent.length + 1; // the +1 is for the action form at the end.
+    var new_row = torrents_table.insertRow(torrents_table.rows.length);
+    new_row.id = torrent["id"];
+    new_row.className = (torrents_table.rows.length % 2 == 0) ? 'torrent-odd' : 'torrent-even';
+    torrent_link = document.createElement('a');
+    torrent_link.href = '/torrent/' + escape(torrent["id"]);
+    torrent_link.innerHTML = torrent["name"];
+    new_row.insertCell(0).appendChild(torrent_link);
+    var fields = ["percent_complete", "time_remaining", "download_rate", "upload_rate",
+                  "seeders", "leechers", "downloaded", "uploaded", "size", "ratio"];
+    var torrent_id = torrent["id"];
+    for (var i = 0; i < fields.length; i++)
+    {
+      var cell = new_row.insertCell(i + 1);
+      cell.id = fields[i] + "-" + torrent_id;
+      cell.innerHTML = torrent[fields[i]];
+      cell.className = 'numeric';
+    }
+    var action_form = document.createElement('form');
+    action_form.method = "post";
+    action_form.action = "/status-action";
+    action_form.encoding = 'application/x-www-form-urlencoded';
+    var action_select = document.createElement('select');
+    action_select.name = 'action';
+    var options = ["Pause", "Update", "Quit"];
+    for (var i = 0; i < options.length; i++)
+    {
+      var option = document.createElement('option');
+      option.text = options[i];
+      option.value = options[i];
+      action_select.add(option, null);
+    }
+    var submit_button = document.createElement('input');
+    submit_button.type = 'submit';
+    submit_button.value = 'Ok';
+    submit_button.name = 'submit';
+    var hidden  = document.createElement('input');
+    hidden.type = 'hidden';
+    hidden.name = 'torrent-id';
+    hidden.value = torrent["id"];
+    action_form.appendChild(hidden);
+    action_form.appendChild(action_select);
+    action_form.appendChild(submit_button);
+    var form_cell = new_row.insertCell(fields.length + 1);
+    form_cell.appendChild(action_form);
+    form_cell.className = 'numeric';
   }
 END_JS
 }
