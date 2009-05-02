@@ -2270,5 +2270,5 @@ bandwidth limit; same for uploads, except that completed downloads continue to
 get their slice of available bandwidth.  It would be much nicer if bandwidth
 usage was monitored over time, and slices adjusted on the fly (DIFFICULT)
 
-*) Config variables are typed: make use of this type information to use the
-appropriate HTML control, rather than the current textfield (checkboxes for booleans, for example) (SIMPLE)
+*) Table rows are updated automatically via JavaScript: it would be nice to
+always sort them by percentage downloaded, rearranging them as necessary (SIMPLE)
