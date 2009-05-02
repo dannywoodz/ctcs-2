@@ -224,8 +224,8 @@ ctcs_log(LOG_INFO, "CTCS Server started on port $port");
 
 for (my $last_update = time(); defined($server); )
 {
-  my ($readable, $writable) =
-  IO::Select::select($readers, $writers, undef, 1);
+  my ($readable, $writable) = IO::Select::select($readers, $writers, undef, 1);
+
   handle_write($_) for @$writable;
   handle_read($_)  for @$readable;
 
@@ -260,7 +260,6 @@ sub cleanup
   {
     ctcs_log(LOG_INFO, "Cleaning up");
     $readers->remove($server);
-    $server->shutdown(2);
     $server->close();
     undef $server;
   }
@@ -300,12 +299,14 @@ sub register_new_client
   $client->sockopt(TCP_NODELAY, 1);
   $client->blocking(0);
 
+  $clients{$client} = {};
+  $clients{$client}->{messages} = [];
+
   ctcs_log(LOG_INFO,
            "connection from %s:%d",
            address_of($client),
            $client->peerport());
-  $clients{$client} = {};
-  $clients{$client}->{messages} = [];
+
   $readers->add($client);
 }
 
@@ -331,7 +332,6 @@ sub deregister_client
            (defined($hostname)) ? " from $hostname:$port" : "");
   $readers->remove($client) while $readers->exists($client);
   $writers->remove($client) while $writers->exists($client);
-  $client->shutdown(2);
   $client->close();
   $ctcs{closed_connections}++;
 }
@@ -484,7 +484,9 @@ sub writer_function
   return sub {
     my $client  = shift;
 
-    ctcs_log(LOG_DEBUG, "Writing %d bytes of length %d, starting at %d", $message_length - $message_offset, $message_length, $message_offset);
+    ctcs_log(LOG_DEBUG, "Writing %d bytes of length %d, starting at %d",
+	     $message_length - $message_offset, $message_length,
+	     $message_offset);
 
     my $written = syswrite($client,
                            $message,
@@ -492,13 +494,15 @@ sub writer_function
                            $message_offset);
     if (!defined($written))
     {
-      ctcs_log(LOG_WARNING, "Failed to write message '%s', starting at index %d",
+      ctcs_log(LOG_WARNING,
+	       "Failed to write message '%s', starting at index %d",
                $message,
                $message_length - $message_offset);
       return 1; # The message is effectively finished if it has errored
     }
 
-    ctcs_log(LOG_DEBUG, "Wrote %d bytes of a %d byte message", $written, $message_length);
+    ctcs_log(LOG_DEBUG, "Wrote %d bytes of a %d byte message",
+	     $written, $message_length);
 
     $message_offset += $written;
     my $finished = ($message_offset == $message_length);
@@ -506,7 +510,13 @@ sub writer_function
     ctcs_log(LOG_DEBUG,
              "Wrote %d bytes, leaving %d remaining. Message is%s finished",
              $written, $message_length - $message_offset, $finished ? "" : " NOT");
-    shift(@{$clients{$client}->{messages}}) && deregister_client($client) if $close_after_write && $finished;
+
+    if ($close_after_write && $finished)
+    {
+      shift(@{$clients{$client}->{messages}});
+      deregister_client($client);
+    }
+
     return $finished;
   }
 }
@@ -617,7 +627,6 @@ sub function_to_handle_request
   elsif (/^POST\s+([^\s]+)/)
   {
     my $target = $1;
-    my $close_after_write = $message =~ /Connection: close/i;
     return writer_function(sub { handle_form_submission($target, $client, $_)}, 1);
   }
   elsif (/^DUMP\s*$/)
@@ -663,6 +672,13 @@ sub handle_send_page
   my $page;
   my $plain = 0;
   my $page_content = page_content($location, \$plain);
+
+  #############################################################################
+  # A request that sets $$plain to a true value is most likely a handler for
+  # an AJAX request.  This flag indicates that the content should *not* be
+  # wrapped up in an HTML head, body, etc, but should just go out as-is with
+  # an HTTP header slapped on top.
+  #############################################################################
 
   if ($page_content)
   {
@@ -912,7 +928,10 @@ sub calculate_time_remaining
 sub index_page
 {
   return with_output_to_string {
-    print h2({-id => 'title'}, 'CTorrent Control Server' . span({style=>'font-size: 250%; font-style: italic; position: relative; z-index: -1; top: 0.2em; right: 0.75em; color: #bfb;'}, '2'));
+    print h2({-id => 'title'},
+	     'CTorrent Control Server' .
+	     span({style=>'font-size: 250%; font-style: italic; position: relative; z-index: -1; top: 0.2em; right: 0.75em; color: #bfb;'},
+		  '2'));
     my ($download_bandwidth, $upload_bandwidth) = total_used_bandwidth();
     my $current_download_field = human_readable($download_bandwidth);
     my $current_upload_field = human_readable($upload_bandwidth);
@@ -930,10 +949,16 @@ sub index_page
     printf '<form method="post" action="/" enctype="%s">', FORM_ENCODING;
     print div({id => 'global-bandwidth-limits'},
               table(
-                    Tr(th('Current Download Bandwidth:'), td({id => 'download-bandwidth'}, $current_download_field . '/s')),
-                    Tr(th('Current Upload Bandwidth:'), td({id => 'upload-bandwidth'}, $current_upload_field . '/s')),
-                    Tr(th('Global Download Limit:'), td($download_field, ' KB/s')),
-                    Tr(th('Global Upload Limit:'), td($upload_field, ' KB/s')),
+                    Tr(th('Current Download Bandwidth:'),
+		       td({id => 'download-bandwidth'},
+			  $current_download_field . '/s')),
+                    Tr(th('Current Upload Bandwidth:'),
+		       td({id => 'upload-bandwidth'},
+			  $current_upload_field . '/s')),
+                    Tr(th('Global Download Limit:'),
+		       td($download_field, ' KB/s')),
+                    Tr(th('Global Upload Limit:'),
+		       td($upload_field, ' KB/s')),
                     Tr(th('Auto-Refresh:'),
                        td(checkbox(-name    => 'auto-refresh',
                                    -label   => '',
@@ -943,7 +968,8 @@ sub index_page
                     Tr(td(a({href  => '/advanced-limits',
                              title => 'Fine-grained control over bandwidth limits'},
                             'Advanced Limits')),
-                       td({align => 'right'}, $submit_button))));
+                       td({align => 'right'},
+			  $submit_button))));
     print end_form();
 
     print CGI::start_table({id => 'torrents'});
@@ -970,12 +996,15 @@ sub index_page
       my $uploaded         = human_readable($torrent->{uploaded}, '0.2f');
       my $size             = human_readable($torrent->{size}, 'd', '0.2f');
       my $percent_complete = sprintf('%d%%', $torrent->{percent_complete});
-      my $smoothed_dl_rate= 0;
+      my $smoothed_dl_rate = 0;
 
       $smoothed_dl_rate += $_ for @{$torrent->{download_rate_history}};
-      $smoothed_dl_rate= $smoothed_dl_rate/$#{$torrent->{download_rate_history}} if $smoothed_dl_rate > 0;
+      $smoothed_dl_rate = $smoothed_dl_rate/$#{$torrent->{download_rate_history}} if $smoothed_dl_rate > 0;
 
-      my $time_to_finish   = calculate_time_remaining($torrent->{downloaded_chunks}, $torrent->{total_chunks}, $torrent->{piece_size}, $smoothed_dl_rate);
+      my $time_to_finish   = calculate_time_remaining($torrent->{downloaded_chunks},
+						      $torrent->{total_chunks},
+						      $torrent->{piece_size},
+						      $smoothed_dl_rate);
       my $raw_ratio        = ($torrent->{uploaded} == 0) ? 0 :
       ($torrent->{downloaded} == 0) ? 'Inf.' :
       $torrent->{uploaded} / $torrent->{downloaded};
@@ -1964,6 +1993,11 @@ sub peer_count_for
 
 sub javascript
 {
+  #############################################################################
+  # Yes, my JavaScript is poor: a better scripter than I should refactor this
+  # entire block of code at the earliest opportunity
+  #############################################################################
+
   my $script=<<END_JS;
   var xmlHttp = null;
 
@@ -2156,7 +2190,16 @@ sub javascript
       var second_percent = parseInt(b.cells[1].innerHTML);
       return second_percent - first_percent;
     });
-    for (var i = 0; i < new_rows.length; i++) table.rows[i + 1] = new_rows[i];
+    while(table.rows.length > 1) table.deleteRow(1);
+
+    /* Now that I've gone and re-sorted everything, the row colours are most
+       likely screwed, so they need re-adjusting */
+
+    for (var i = 0; i < new_rows.length; i++)
+    {
+      new_rows[i].className = (i % 2 == 0) ? 'torrent-even' : 'torrent-odd';
+      table.appendChild(new_rows[i]);
+    }
   }
 END_JS
 }
@@ -2282,6 +2325,3 @@ that neither completed or paused gets an even slice of the global downoad
 bandwidth limit; same for uploads, except that completed downloads continue to
 get their slice of available bandwidth.  It would be much nicer if bandwidth
 usage was monitored over time, and slices adjusted on the fly (DIFFICULT)
-
-*) Table rows are updated automatically via JavaScript: it would be nice to
-always sort them by percentage downloaded, rearranging them as necessary (SIMPLE)
