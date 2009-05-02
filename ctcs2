@@ -224,8 +224,8 @@ ctcs_log(LOG_INFO, "CTCS Server started on port $port");
 
 for (my $last_update = time(); defined($server); )
 {
-  my ($readable, $writable) =
-  IO::Select::select($readers, $writers, undef, 1);
+  my ($readable, $writable) = IO::Select::select($readers, $writers, undef, 1);
+
   handle_write($_) for @$writable;
   handle_read($_)  for @$readable;
 
@@ -260,7 +260,6 @@ sub cleanup
   {
     ctcs_log(LOG_INFO, "Cleaning up");
     $readers->remove($server);
-    $server->shutdown(2);
     $server->close();
     undef $server;
   }
@@ -485,7 +484,9 @@ sub writer_function
   return sub {
     my $client  = shift;
 
-    ctcs_log(LOG_DEBUG, "Writing %d bytes of length %d, starting at %d", $message_length - $message_offset, $message_length, $message_offset);
+    ctcs_log(LOG_DEBUG, "Writing %d bytes of length %d, starting at %d",
+	     $message_length - $message_offset, $message_length,
+	     $message_offset);
 
     my $written = syswrite($client,
                            $message,
@@ -493,13 +494,15 @@ sub writer_function
                            $message_offset);
     if (!defined($written))
     {
-      ctcs_log(LOG_WARNING, "Failed to write message '%s', starting at index %d",
+      ctcs_log(LOG_WARNING,
+	       "Failed to write message '%s', starting at index %d",
                $message,
                $message_length - $message_offset);
       return 1; # The message is effectively finished if it has errored
     }
 
-    ctcs_log(LOG_DEBUG, "Wrote %d bytes of a %d byte message", $written, $message_length);
+    ctcs_log(LOG_DEBUG, "Wrote %d bytes of a %d byte message",
+	     $written, $message_length);
 
     $message_offset += $written;
     my $finished = ($message_offset == $message_length);
@@ -507,7 +510,13 @@ sub writer_function
     ctcs_log(LOG_DEBUG,
              "Wrote %d bytes, leaving %d remaining. Message is%s finished",
              $written, $message_length - $message_offset, $finished ? "" : " NOT");
-    shift(@{$clients{$client}->{messages}}) && deregister_client($client) if $close_after_write && $finished;
+
+    if ($close_after_write && $finished)
+    {
+      shift(@{$clients{$client}->{messages}});
+      deregister_client($client);
+    }
+
     return $finished;
   }
 }
@@ -618,7 +627,6 @@ sub function_to_handle_request
   elsif (/^POST\s+([^\s]+)/)
   {
     my $target = $1;
-    my $close_after_write = $message =~ /Connection: close/i;
     return writer_function(sub { handle_form_submission($target, $client, $_)}, 1);
   }
   elsif (/^DUMP\s*$/)
@@ -664,6 +672,13 @@ sub handle_send_page
   my $page;
   my $plain = 0;
   my $page_content = page_content($location, \$plain);
+
+  #############################################################################
+  # A request that sets $$plain to a true value is most likely a handler for
+  # an AJAX request.  This flag indicates that the content should *not* be
+  # wrapped up in an HTML head, body, etc, but should just go out as-is with
+  # an HTTP header slapped on top.
+  #############################################################################
 
   if ($page_content)
   {
@@ -913,7 +928,10 @@ sub calculate_time_remaining
 sub index_page
 {
   return with_output_to_string {
-    print h2({-id => 'title'}, 'CTorrent Control Server' . span({style=>'font-size: 250%; font-style: italic; position: relative; z-index: -1; top: 0.2em; right: 0.75em; color: #bfb;'}, '2'));
+    print h2({-id => 'title'},
+	     'CTorrent Control Server' .
+	     span({style=>'font-size: 250%; font-style: italic; position: relative; z-index: -1; top: 0.2em; right: 0.75em; color: #bfb;'},
+		  '2'));
     my ($download_bandwidth, $upload_bandwidth) = total_used_bandwidth();
     my $current_download_field = human_readable($download_bandwidth);
     my $current_upload_field = human_readable($upload_bandwidth);
@@ -931,13 +949,18 @@ sub index_page
     printf '<form method="post" action="/" enctype="%s">', FORM_ENCODING;
     print div({id => 'global-bandwidth-limits'},
               table(
-                    Tr(th('Current Download Bandwidth:'), td({class => 'numeric', id => 'download-bandwidth'}, $current_download_field . '/s')),
-                    Tr(th('Current Upload Bandwidth:'), td({class => 'numeric', id => 'upload-bandwidth'}, $current_upload_field . '/s')),
-                    Tr(th('Global Download Limit:'), td($download_field, ' KB/s')),
-                    Tr(th('Global Upload Limit:'), td($upload_field, ' KB/s')),
+                    Tr(th('Current Download Bandwidth:'),
+		       td({id => 'download-bandwidth'},
+			  $current_download_field . '/s')),
+                    Tr(th('Current Upload Bandwidth:'),
+		       td({id => 'upload-bandwidth'},
+			  $current_upload_field . '/s')),
+                    Tr(th('Global Download Limit:'),
+		       td($download_field, ' KB/s')),
+                    Tr(th('Global Upload Limit:'),
+		       td($upload_field, ' KB/s')),
                     Tr(th('Auto-Refresh:'),
-                       td({class => 'numeric'},
-                          checkbox(-name    => 'auto-refresh',
+                       td(checkbox(-name    => 'auto-refresh',
                                    -label   => '',
                                    -value   => '1',
                                    -id      => 'auto-refresh',
@@ -945,7 +968,8 @@ sub index_page
                     Tr(td(a({href  => '/advanced-limits',
                              title => 'Fine-grained control over bandwidth limits'},
                             'Advanced Limits')),
-                       td({align => 'right'}, $submit_button))));
+                       td({align => 'right'},
+			  $submit_button))));
     print end_form();
 
     print CGI::start_table({id => 'torrents'});
@@ -972,17 +996,21 @@ sub index_page
       my $uploaded         = human_readable($torrent->{uploaded}, '0.2f');
       my $size             = human_readable($torrent->{size}, 'd', '0.2f');
       my $percent_complete = sprintf('%d%%', $torrent->{percent_complete});
-      my $smoothed_dl_rate= 0;
+      my $smoothed_dl_rate = 0;
 
       $smoothed_dl_rate += $_ for @{$torrent->{download_rate_history}};
-      $smoothed_dl_rate= $smoothed_dl_rate/$#{$torrent->{download_rate_history}} if $smoothed_dl_rate > 0;
+      $smoothed_dl_rate = $smoothed_dl_rate/$#{$torrent->{download_rate_history}} if $smoothed_dl_rate > 0;
 
-      my $time_to_finish   = calculate_time_remaining($torrent->{downloaded_chunks}, $torrent->{total_chunks}, $torrent->{piece_size}, $smoothed_dl_rate);
+      my $time_to_finish   = calculate_time_remaining($torrent->{downloaded_chunks},
+						      $torrent->{total_chunks},
+						      $torrent->{piece_size},
+						      $smoothed_dl_rate);
       my $raw_ratio        = ($torrent->{uploaded} == 0) ? 0 :
       ($torrent->{downloaded} == 0) ? 'Inf.' :
       $torrent->{uploaded} / $torrent->{downloaded};
       my $ratio            = formatted_ratio_for($torrent);
       my $row_class        = ($count % 2 == 0) ? 'torrent-even' : 'torrent-odd';
+      $row_class .= ' complete' if $torrent->{percent_complete} == 100;
       my $red              = ($ratio eq 'Inf.') ? 0 : int((1 - $ratio) * 255);
       my $green            = ($ratio eq 'Inf.') ? 255 : int($ratio * 128);
 
@@ -995,19 +1023,18 @@ sub index_page
       $torrent->{config}->{pause}->{value} == 1 && ($row_class .= ' paused');
       print Tr({class => $row_class,
                 id    => $torrent_id},
-               td($torrent_link),
-               td({class => 'numeric', id => "percent_complete-$torrent_id"}, $percent_complete),
-               td({class => 'numeric', id => "time_remaining-$torrent_id"}, $time_to_finish),
-               td({class => 'numeric', id => "download_rate-$torrent_id"}, $download_rate . '/s'),
-               td({class => 'numeric', id => "upload_rate-$torrent_id"}, $upload_rate . '/s'),
-               td({class => 'numeric', id => "seeders-$torrent_id"}, $active_seeders, '/', $total_seeders),
-               td({class => 'numeric', id => "leechers-$torrent_id"}, $active_leechers, '/', $total_leechers),
-               td({class => 'numeric', id => "downloaded-$torrent_id"}, $downloaded),
-               td({class => 'numeric', id => "uploaded-$torrent_id"}, $uploaded),
-               td({class => 'numeric', id => "size-$torrent_id"}, $size),
-               td({class => "numeric", style => "color: $row_colour", id => "ratio-$torrent_id"}, $ratio),
-               td({class => 'numeric'},
-		  sprintf('<form name="$torrent_id" method="post" action="/status-action" enctype="%s">',
+               td({class => 'title'}, $torrent_link),
+               td({id => "percent_complete-$torrent_id"}, $percent_complete),
+               td({id => "time_remaining-$torrent_id"}, $time_to_finish),
+               td({id => "download_rate-$torrent_id"}, $download_rate . '/s'),
+               td({id => "upload_rate-$torrent_id"}, $upload_rate . '/s'),
+               td({id => "seeders-$torrent_id"}, $active_seeders, '/', $total_seeders),
+               td({id => "leechers-$torrent_id"}, $active_leechers, '/', $total_leechers),
+               td({id => "downloaded-$torrent_id"}, $downloaded),
+               td({id => "uploaded-$torrent_id"}, $uploaded),
+               td({id => "size-$torrent_id"}, $size),
+               td({style => "color: $row_colour", id => "ratio-$torrent_id"}, $ratio),
+               td(sprintf('<form name="$torrent_id" method="post" action="/status-action" enctype="%s">',
 			  FORM_ENCODING),
                   Select({name         => 'action'},
                          option({value => $pause_unpause,
@@ -1098,7 +1125,7 @@ sub advanced_limits_page
                                         !exists($torrent->{manual_upload_limit})
                                        );
       print Tr({class => ($count % 2) == 0 ? 'torrent-even' : 'torrent-odd'},
-               td($torrent->{name}),
+               td({class => 'title'}, $torrent->{name}),
                td($upload_limit_widget),
                td($download_limit_widget),
                td($auto_manage_widget)
@@ -1124,7 +1151,7 @@ sub ctcs_file_table
     {
       my $file = $files[$count];
       print Tr({class => ($count % 2 == 1) ? 'file-even' : 'file-odd'},
-               td($count, ': ', $file->{name}),
+               td({class => 'title'}, $count, ': ', $file->{name}),
                td({align => 'right'}, human_readable($file->{size}, 'd', '.02f')),
                td({align => 'right'}, int($file->{percent_done}), '%'));
     }
@@ -1145,12 +1172,12 @@ sub ctcs_config_table
     for (my $count = 0; $count < scalar @config_options; $count++)
     {
       print Tr({class => ($count % 2 == 0) ? 'peer-even' : 'peer-odd'},
-               td({class => 'numeric'}, $config{$config_options[$count]}->{short_desc}),
-               td({class => 'numeric'}, ctcs_config_table_widget($config_options[$count],
+               td($config{$config_options[$count]}->{short_desc}),
+               td(ctcs_config_table_widget($config_options[$count],
                                                                  $config{$config_options[$count]})),
                td($config{$config_options[$count]}->{long_desc}));
     }
-    print Tr(td(), td({class => 'numeric'}, submit(-value => 'Apply Changes')), td());
+    print Tr(td(), td(submit(-value => 'Apply Changes')), td());
     print CGI::end_table();
     print hidden(-name => 'torrent-id', -value => CGI::escape($torrent_info->{ctcs_id}));
     print end_form();
@@ -1190,13 +1217,13 @@ sub ctcs_peers_table
       my $peer      = $peers[$count];
       print Tr({class => ($count % 2 == 0) ? 'peer-even' : 'peer-odd'},
                td({class => ($peer->{pieces} == $torrent_info->{total_chunks}) ? 'seed' : 'leech'}),
-               td({class => 'numeric'}, $peer->{address}),
-               td({class => 'numeric'}, $peer->{pieces},
+               td($peer->{address}),
+               td($peer->{pieces},
                   sprintf('(%d%%)', int(($peer->{pieces} / $torrent_info->{total_chunks}) * 100))),
-               td({class => 'numeric'}, human_readable($peer->{uploaded})),
-               td({class => 'numeric'}, human_readable($peer->{upload_rate})),
-               td({class => 'numeric'}, human_readable($peer->{downloaded})),
-               td({class => 'numeric'}, human_readable($peer->{download_rate})));
+               td(human_readable($peer->{uploaded})),
+               td(human_readable($peer->{upload_rate})),
+               td(human_readable($peer->{downloaded})),
+               td(human_readable($peer->{download_rate})));
     }
     print CGI::end_table();
   };
@@ -1967,6 +1994,11 @@ sub peer_count_for
 
 sub javascript
 {
+  #############################################################################
+  # Yes, my JavaScript is poor: a better scripter than I should refactor this
+  # entire block of code at the earliest opportunity
+  #############################################################################
+
   my $script=<<END_JS;
   var xmlHttp = null;
 
@@ -2011,6 +2043,7 @@ sub javascript
           for (var i = 0; i < torrent_data.length; i++) {
             var torrent = torrent_data[i];
             var row_id = torrent["id"];
+            var completed = parseInt(torrent['percent_complete']) == 100;
             var ratio_element;
             var ratio_colour;
             var ratio;
@@ -2023,6 +2056,10 @@ sub javascript
             row = document.getElementById(row_id);
             if (row)
             {
+              if (completed && row.className.search(/complete/) == -1)
+              {
+                row.className += ' complete';
+              }
               document.getElementById('percent_complete-' + row_id).innerHTML = torrent["percent_complete"];
               document.getElementById('time_remaining-' + row_id).innerHTML = torrent["time_remaining"];
               document.getElementById('download_rate-' + row_id).innerHTML = torrent["download_rate"];
@@ -2106,7 +2143,9 @@ sub javascript
     torrent_link = document.createElement('a');
     torrent_link.href = '/torrent/' + escape(torrent["id"]);
     torrent_link.innerHTML = torrent["name"];
-    new_row.insertCell(0).appendChild(torrent_link);
+    var title_cell = new_row.insertCell(0);
+    title_cell.className = 'title';
+    title_cell.appendChild(torrent_link);
     var fields = ["percent_complete", "time_remaining", "download_rate", "upload_rate",
                   "seeders", "leechers", "downloaded", "uploaded", "size", "ratio"];
     var torrent_id = torrent["id"];
@@ -2115,7 +2154,6 @@ sub javascript
       var cell = new_row.insertCell(i + 1);
       cell.id = fields[i] + "-" + torrent_id;
       cell.innerHTML = torrent[fields[i]];
-      cell.className = 'numeric';
     }
     var action_form = document.createElement('form');
     action_form.method = "post";
@@ -2146,7 +2184,6 @@ sub javascript
     action_form.appendChild(submit_button);
     var form_cell = new_row.insertCell(fields.length + 1);
     form_cell.appendChild(action_form);
-    form_cell.className = 'numeric';
   }
 
   function sort_table(table)
@@ -2157,11 +2194,18 @@ sub javascript
     new_rows.sort(function(a, b) {
       var first_percent = parseInt(a.cells[1].innerHTML);
       var second_percent = parseInt(b.cells[1].innerHTML);
-      dump('First percent ' + first_percent);
-      dump('Second percent ' + second_percent);
       return second_percent - first_percent;
     });
-    for (var i = 0; i < new_rows.length; i++) table.rows[i + 1] = new_rows[i];
+    while(table.rows.length > 1) table.deleteRow(1);
+
+    /* Now that I've gone and re-sorted everything, the row colours are most
+       likely screwed, so they need re-adjusting */
+
+    for (var i = 0; i < new_rows.length; i++)
+    {
+      new_rows[i].className = (i % 2 == 0) ? 'torrent-even' : 'torrent-odd';
+      table.appendChild(new_rows[i]);
+    }
   }
 END_JS
 }
@@ -2185,7 +2229,8 @@ table#torrents, table#files, table#peers, table#config {width: 100%; border-coll
 table#files { width: auto; }
 .torrent-even, .peer-even, .file-even { border-width: 1px; border-style: solid; border-color: #cdc; border-top-color: #fff; }
 .torrent-odd, .peer-odd, .file-odd { border-width: 1px; border-style: solid; border-color: #bcb; border-top-color: #efe; }
-td.numeric { text-align: center; }
+td { text-align: center; }
+td.title { text-align: left; }
 #upload-bandwidth, .excellent-ratio { color: #3b3; }
 .good-ratio { color: #292; }
 .ok-ratio { color: #992; }
@@ -2194,6 +2239,7 @@ td.numeric { text-align: center; }
 td.seed, td.leech, .paused { filter:alpha(opacity=50); opacity: 0.5; -moz-opacity:0.5; }
 td.seed { width: 1em; background-color: #3b3; }
 td.leech { width: 1em; background-color: #a22; }
+td.complete { font-weight: bold; }
 END_CSS
 }
 __END__
@@ -2286,6 +2332,3 @@ that neither completed or paused gets an even slice of the global downoad
 bandwidth limit; same for uploads, except that completed downloads continue to
 get their slice of available bandwidth.  It would be much nicer if bandwidth
 usage was monitored over time, and slices adjusted on the fly (DIFFICULT)
-
-*) Table rows are updated automatically via JavaScript: it would be nice to
-always sort them by percentage downloaded, rearranging them as necessary (SIMPLE)
