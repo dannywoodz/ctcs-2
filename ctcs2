@@ -845,7 +845,8 @@ sub json_status
                                       '"downloaded": "%s"',
                                       '"uploaded": "%s"',
                                       '"size": "%s"',
-                                      '"ratio": "%s"}')),
+                                      '"ratio": "%s"',
+				      '"paused": "%s"}')),
                                 ($torrent->{internal_id},
                                  $torrent->{name},
                                  sprintf('%d%%', $torrent->{percent_complete}),
@@ -857,7 +858,8 @@ sub json_status
                                  human_readable($torrent->{downloaded}, '0.2f'),
                                  human_readable($torrent->{uploaded}, '0.2f'),
                                  human_readable($torrent->{size}, 'd', '0.2f'),
-                                 formatted_ratio_for($torrent)))
+                                 formatted_ratio_for($torrent),
+				 torrent_is_paused($torrent)))
                       } torrent_clients());
   print $status ']}';
   return ${$status->string_ref()};
@@ -2005,10 +2007,12 @@ sub javascript
             var ratio;
             var green;
             var red;
+            var row;
 
             // If the row's already there, update it.
 
-            if (document.getElementById(row_id))
+            row = document.getElementById(row_id);
+            if (row)
             {
               document.getElementById('percent_complete-' + row_id).innerHTML = torrent["percent-complete"];
               document.getElementById('time_remaining-' + row_id).innerHTML = torrent["time_remaining"];
@@ -2021,6 +2025,16 @@ sub javascript
               document.getElementById('size-' + row_id).innerHTML = torrent["size"];
               ratio_element = document.getElementById('ratio-' + row_id)
               ratio_element.innerHTML = torrent["ratio"];
+              var row_class = row.className;
+              if (data["paused"] == '1' && !row_class.search(/paused/))
+              {
+                row.className += ' paused';
+              }
+              else if (data["paused"] == '0' && row_class.search(/paused/))
+              {
+                row.className = row.className.replace(/\spaused/, '');
+              }
+
               if (torrent["ratio"] == "Inf.")
               {
                 red = 0;
@@ -2032,7 +2046,9 @@ sub javascript
                 red = 255 - (ratio * 255);  if (red < 0.0) red = 0.0;
                 green = ratio * 128; if (green > 255) green = 255;
               }
-              ratio_element.style.color = '#' + ((red << 16) | (green << 8) | 0).toString(16);
+              var colour = '' + ((red << 16) | (green << 8) | 0).toString(16);
+              while(colour.length < 6) colour = '0' + colour;
+              ratio_element.style.color = '#' + colour;
             }
             else // the row's not there: create it.
             {
@@ -2076,7 +2092,7 @@ sub javascript
     torrent_link.href = '/torrent/' + escape(torrent["id"]);
     torrent_link.innerHTML = torrent["name"];
     new_row.insertCell(0).appendChild(torrent_link);
-    var fields = ["percent-complete", "time_remaining", "download-rate", "upload-rate",
+    var fields = ["percent_complete", "time_remaining", "download_rate", "upload_rate",
                   "seeders", "leechers", "downloaded", "uploaded", "size", "ratio"];
     var torrent_id = torrent["id"];
     for (var i = 0; i < fields.length; i++)
