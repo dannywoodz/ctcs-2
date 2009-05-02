@@ -2108,23 +2108,23 @@ sub javascript
             }
           }
           // Finally, go through the rows in the table and delete any that are not in the incoming data
-           var table = document.getElementById('torrents');
-           var index = 1; // Exclude the headings
-           while(index < table.rows.length)
-           {
-             var id = table.rows[i].id;
-             var found = 0;
-             for (var i = 0; i < torrent_data.length; i++) if (torrent_data[i]["id"] == id) found = 1;
-             if (!found)
-             {
-               table.deleteRow(index);
-             }
-             else
-             {
-               index++;
-             }
-           }
-           sort_table(table);
+          var table = document.getElementById('torrents');
+          var index = 1; // Exclude the headings
+          while(index < table.rows.length)
+          {
+            var id = table.rows[i].id;
+            var found = 0;
+            for (var i = 0; i < torrent_data.length; i++) if (torrent_data[i]["id"] == id) found = 1;
+            if (!found)
+            {
+              table.deleteRow(index);
+            }
+            else
+            {
+              index++;
+            }
+          }
+          sort_table(table);
         }
       };
       xmlHttp.open("GET", "/current-status")
@@ -2203,7 +2203,10 @@ sub javascript
 
     for (var i = 0; i < new_rows.length; i++)
     {
-      new_rows[i].className = (i % 2 == 0) ? 'torrent-even' : 'torrent-odd';
+      var current_class = new_rows[i].className;
+      var new_class = (i % 2 == 0) ? 'torrent-even' : 'torrent-odd';
+      current_class = current_class.replace(/torrent-(even|odd)/, new_class);
+      new_rows[i].className = current_class;
       table.appendChild(new_rows[i]);
     }
   }
