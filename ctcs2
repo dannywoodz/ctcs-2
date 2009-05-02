@@ -2086,6 +2086,7 @@ sub javascript
                index++;
              }
            }
+           sort_table(table);
         }
       };
       xmlHttp.open("GET", "/current-status")
@@ -2145,6 +2146,21 @@ sub javascript
     var form_cell = new_row.insertCell(fields.length + 1);
     form_cell.appendChild(action_form);
     form_cell.className = 'numeric';
+  }
+
+  function sort_table(table)
+  {
+    var rows = table.rows;
+    var new_rows = new Array(rows.length);
+    for (var i = 0; i < rows.length; i++) new_rows[i] = rows.item(i);
+    new_rows.sort(function(a, b) {
+      var first_percent = parseInt(a.cells[1].innerHTML);
+      var second_percent = parseInt(b.cells[1].innerHTML);
+      dump('First percent ' + first_percent);
+      dump('Second percent ' + second_percent);
+      return first_percent - second_percent;
+    });
+    for (var i = 1; i < new_rows.length; i++) table.rows[i + 1] = new_rows[i];
   }
 END_JS
 }
