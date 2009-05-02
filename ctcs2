@@ -105,7 +105,8 @@ my $help                    = undef;
 #
 # A typical clients hash might look like this:
 #
-# %clients{$socket}->{torrent}->{id}
+# %clients{$socket}->{torrent}->{ctorrent_id}
+#                             ->{ctcs_id}
 #                             ->{name}
 #                             ->{upload_rate}
 #                             ->{download_rate}
@@ -847,7 +848,7 @@ sub json_status
                                       '"size": "%s"',
                                       '"ratio": "%s"',
 				      '"paused": "%s"}')),
-                                ($torrent->{internal_id},
+                                ($torrent->{ctcs_id},
                                  $torrent->{name},
                                  sprintf('%d%%', $torrent->{percent_complete}),
                                  calculate_time_remaining($torrent->{downloaded_chunks},
@@ -958,8 +959,8 @@ sub index_page
     for (my $count = 0; $count < @torrent_info; $count++)
     {
       my $torrent          = $torrent_info[$count];
-      my $torrent_id       = CGI::escape($torrent->{internal_id});
-      my $torrent_link     = a({href=> "/torrent/" . CGI::escape($torrent->{internal_id})}, $torrent->{name});
+      my $torrent_id       = CGI::escape($torrent->{ctcs_id});
+      my $torrent_link     = a({href=> "/torrent/" . CGI::escape($torrent->{ctcs_id})}, $torrent->{name});
       my $upload_rate      = human_readable($torrent->{upload_rate});
       my $download_rate    = human_readable($torrent->{download_rate});
       my $total_seeders    = $torrent->{total_seeders};
@@ -1004,9 +1005,13 @@ sub index_page
                td({class => 'numeric', id => "uploaded-$torrent_id"}, $uploaded),
                td({class => 'numeric', id => "size-$torrent_id"}, $size),
                td({class => "numeric", style => "color: $row_colour", id => "ratio-$torrent_id"}, $ratio),
-               td(sprintf('<form name="$torrent_id" method="post" action="/status-action" enctype="%s">', FORM_ENCODING),
+               td({class => 'numeric'},
+		  sprintf('<form name="$torrent_id" method="post" action="/status-action" enctype="%s">',
+			  FORM_ENCODING),
                   Select({name         => 'action'},
-                         option({value => $pause_unpause}, $pause_unpause),
+                         option({value => $pause_unpause,
+				 id    => "pause_unpause-$torrent_id"},
+				$pause_unpause),
                          option({value => 'Update'}, 'Update'),
                          option({value => 'Quit'}, 'Quit')),
                   submit(-name         => 'submit', -value => 'Ok'),
@@ -1076,7 +1081,7 @@ sub advanced_limits_page
       my $torrent = torrent_handled_by($client);
       my $upload_limit = int(($torrent->{manual_upload_limit} || $torrent->{upload_limit} || 0) / 1024);
       my $download_limit = int(($torrent->{manual_download_limit} || $torrent->{download_limit} || 0) / 1024);
-      my $id = CGI::escape($torrent->{internal_id});
+      my $id = CGI::escape($torrent->{ctcs_id});
       my $upload_limit_widget = textfield(-name => "upload-$id",
                                           -size => 6,
                                           -value => $upload_limit);
@@ -1146,7 +1151,7 @@ sub ctcs_config_table
     }
     print Tr(td(), td({class => 'numeric'}, submit(-value => 'Apply Changes')), td());
     print CGI::end_table();
-    print hidden(-name => 'torrent-id', -value => CGI::escape($torrent_info->{internal_id}));
+    print hidden(-name => 'torrent-id', -value => CGI::escape($torrent_info->{ctcs_id}));
     print end_form();
   }
 }
@@ -1299,8 +1304,8 @@ sub handle_register_torrent
 
   my $info = {};
   $info->{name}                  = $torrent_name;
-  $info->{id}                    = $torrent_id;
-  $info->{internal_id}           = ++$current_id;
+  $info->{ctorrent_id}           = $torrent_id;
+  $info->{ctcs_id}               = ++$current_id;
   $info->{config}                = { pause => {value => 0}};
   $info->{percent_complete}      = 0;
   $info->{files}                 = [];
@@ -1544,7 +1549,7 @@ sub get_torrent_by_id
   foreach my $client (keys %clients)
   {
     if (exists($clients{$client}->{torrent}) &&
-        $clients{$client}->{torrent}->{internal_id} eq $id) {
+        $clients{$client}->{torrent}->{ctcs_id} eq $id) {
       return $clients{$client}->{torrent};
     }
   }
@@ -1558,7 +1563,7 @@ sub get_client_by_id
   foreach my $client (keys %clients)
   {
     if (exists($clients{$client}->{torrent}) &&
-        $clients{$client}->{torrent}->{internal_id} eq $id) {
+        $clients{$client}->{torrent}->{ctcs_id} eq $id) {
       return $client;
     }
   }
@@ -1839,7 +1844,7 @@ sub torrent_set_bandwidth_limit
 {
   my ($torrent, $direction, $limit) = @_;
   my $message = ($direction eq 'upload') ? 'U' : 'D';
-  my $client = get_client_by_id($torrent->{internal_id});
+  my $client = get_client_by_id($torrent->{ctcs_id});
   if ($direction eq 'upload')
   {
     $torrent->{upload_limit} = $limit;
@@ -1864,12 +1869,12 @@ sub torrent_set_bandwidth_limit
 
 sub torrent_quit
 {
-  send_message("CTQUIT\r\n", get_client_by_id((shift)->{internal_id}));
+  send_message("CTQUIT\r\n", get_client_by_id((shift)->{ctcs_id}));
 }
 
 sub torrent_update
 {
-  send_message("CTUPDATE\r\n", get_client_by_id((shift)->{internal_id}));
+  send_message("CTUPDATE\r\n", get_client_by_id((shift)->{ctcs_id}));
 }
 
 sub torrent_pause
@@ -1891,7 +1896,7 @@ sub torrent_resume
 sub torrent_set_config
 {
   my ($torrent, $config_option, $value) = @_;
-  my $client = get_client_by_id($torrent->{internal_id});
+  my $client = get_client_by_id($torrent->{ctcs_id});
   if (!defined($client))
   {
     ctcs_log(LOG_WARNING,
@@ -2028,14 +2033,20 @@ sub javascript
               document.getElementById('size-' + row_id).innerHTML = torrent["size"];
               ratio_element = document.getElementById('ratio-' + row_id)
               ratio_element.innerHTML = torrent["ratio"];
-              var row_class = row.className;
-              if (data["paused"] == '1' && !row_class.search(/paused/))
+
+              if (torrent["paused"] == '1' && row.className.search(/paused/) == -1)
               {
-                row.className += ' paused';
+                row.className = row.className + ' paused';
+                var pause_option = document.getElementById('pause_unpause-' + row_id);
+                pause_option.text = 'Resume';
+                pause_option.value = 'Resume';
               }
-              else if (data["paused"] == '0' && row_class.search(/paused/))
+              else if (torrent["paused"] == '' && row.className.search(/paused/) >= 0)
               {
-                row.className = row.className.replace(/\spaused/, '');
+                row.className = row.className.replace(/paused/, '');
+                var pause_option = document.getElementById('pause_unpause-' + row_id);
+                pause_option.text = 'Pause';
+                pause_option.value = 'Pause';
               }
 
               if (torrent["ratio"] == "Inf.")
@@ -2110,12 +2121,14 @@ sub javascript
     action_form.encoding = 'application/x-www-form-urlencoded';
     var action_select = document.createElement('select');
     action_select.name = 'action';
-    var options = ["Pause", "Update", "Quit"];
+    var pause_unpause = (torrent["paused"] == 1) ? "Resume" : "Pause";
+    var options = [ pause_unpause, "Update", "Quit"];
     for (var i = 0; i < options.length; i++)
     {
       var option = document.createElement('option');
       option.text = options[i];
       option.value = options[i];
+      if (options[i] == 'Pause' || options[i] == 'Resume') option.id = 'pause_unpause-' + torrent_id;
       action_select.add(option, null);
     }
     var submit_button = document.createElement('input');
