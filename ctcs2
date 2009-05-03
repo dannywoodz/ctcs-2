@@ -633,6 +633,10 @@ sub function_to_handle_request
   {
     $ctcs{protocol} = $1;
   }
+  elsif (/^CTFILESDONE|CTFILESTART|CTCONFIGSTART|CTCONFIGDONE/)
+  {
+    # Nothing: just here to avoid triggering the following exception
+  }
   else
   {
     die "No function to handle request '$message'\n";
@@ -709,10 +713,10 @@ sub handle_send_page
     $response_code = '404 Not Found';
   }
 
-  return sprintf("HTTP/1.1 %s\r\n%s%s",
-                 $response_code,
-                 header({content_length => length($page)}),
-                 $page);
+  return join('',
+	      ("HTTP/1.1 $response_code\r\n",
+	       header({content_length => length($page)}),
+	       $page));
 }
 
 sub handle_form_submission
@@ -853,7 +857,7 @@ sub json_status
                         sprintf(join(', ',
                                      ('{"id": "%s"',
                                       '"name": "%s"',
-                                      '"percent_complete": "%s"',
+                                      '"percent_complete": "%s%%"',
                                       '"time_remaining": "%s"',
                                       '"download_rate": "%s"',
                                       '"upload_rate": "%s"',
@@ -862,11 +866,11 @@ sub json_status
                                       '"downloaded": "%s"',
                                       '"uploaded": "%s"',
                                       '"size": "%s"',
-                                      '"ratio": "%s"',
+				      '"ratio": "%s"',
 				      '"paused": "%s"}')),
                                 ($torrent->{ctcs_id},
                                  $torrent->{name},
-                                 sprintf('%d%%', $torrent->{percent_complete}),
+                                 $torrent->{percent_complete},
                                  calculate_time_remaining($torrent->{downloaded_chunks},
 							  $torrent->{total_chunks},
 							  $torrent->{piece_size},
