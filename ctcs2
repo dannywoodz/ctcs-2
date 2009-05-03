@@ -2040,15 +2040,10 @@ sub javascript
           document.getElementById('download-bandwidth').innerHTML = data["download"];
           document.getElementById('upload-bandwidth').innerHTML = data["upload"];
           var torrent_data = data["torrents"];
-          for (var i = 0; i < torrent_data.length; i++) {
+          for (var i = 0; i < torrent_data.length; i++)
+          {
             var torrent = torrent_data[i];
             var row_id = torrent["id"];
-            var completed = parseInt(torrent['percent_complete']) == 100;
-            var ratio_element;
-            var ratio_colour;
-            var ratio;
-            var green;
-            var red;
             var row;
 
             // If the row's already there, update it.
@@ -2056,75 +2051,15 @@ sub javascript
             row = document.getElementById(row_id);
             if (row)
             {
-              if (completed && row.className.search(/complete/) == -1)
-              {
-                row.className += ' complete';
-              }
-              document.getElementById('percent_complete-' + row_id).innerHTML = torrent["percent_complete"];
-              document.getElementById('time_remaining-' + row_id).innerHTML = torrent["time_remaining"];
-              document.getElementById('download_rate-' + row_id).innerHTML = torrent["download_rate"];
-              document.getElementById('upload_rate-' + row_id).innerHTML = torrent["upload_rate"];
-              document.getElementById('seeders-' + row_id).innerHTML = torrent["seeders"];
-              document.getElementById('leechers-' + row_id).innerHTML = torrent["leechers"];
-              document.getElementById('downloaded-' + row_id).innerHTML = torrent["downloaded"];
-              document.getElementById('uploaded-' + row_id).innerHTML = torrent["uploaded"];
-              document.getElementById('size-' + row_id).innerHTML = torrent["size"];
-              ratio_element = document.getElementById('ratio-' + row_id)
-              ratio_element.innerHTML = torrent["ratio"];
-
-              if (torrent["paused"] == '1' && row.className.search(/paused/) == -1)
-              {
-                row.className = row.className + ' paused';
-                var pause_option = document.getElementById('pause_unpause-' + row_id);
-                pause_option.text = 'Resume';
-                pause_option.value = 'Resume';
-              }
-              else if (torrent["paused"] == '' && row.className.search(/paused/) >= 0)
-              {
-                row.className = row.className.replace(/paused/, '');
-                var pause_option = document.getElementById('pause_unpause-' + row_id);
-                pause_option.text = 'Pause';
-                pause_option.value = 'Pause';
-              }
-
-              if (torrent["ratio"] == "Inf.")
-              {
-                red = 0;
-                green = 255;
-              }
-              else
-              {
-                ratio = parseFloat(torrent["ratio"]);
-                red = 255 - (ratio * 255);  if (red < 0.0) red = 0.0;
-                green = ratio * 128; if (green > 255) green = 255;
-              }
-              var colour = '' + ((red << 16) | (green << 8) | 0).toString(16);
-              while(colour.length < 6) colour = '0' + colour;
-              ratio_element.style.color = '#' + colour;
+              update_torrent_row(row, row_id, torrent);
             }
             else // the row's not there: create it.
             {
               add_new_torrent(torrent);
             }
           }
-          // Finally, go through the rows in the table and delete any that are not in the incoming data
-          var table = document.getElementById('torrents');
-          var index = 1; // Exclude the headings
-          while(index < table.rows.length)
-          {
-            var id = table.rows[i].id;
-            var found = 0;
-            for (var i = 0; i < torrent_data.length; i++) if (torrent_data[i]["id"] == id) found = 1;
-            if (!found)
-            {
-              table.deleteRow(index);
-            }
-            else
-            {
-              index++;
-            }
-          }
-          sort_table(table);
+          cleanup_dead_torrents(torrent_data);
+          sort_torrents_table();
         }
       };
       xmlHttp.open("GET", "/current-status")
@@ -2133,36 +2068,102 @@ sub javascript
     setTimeout('update_with_current_status()', 5000);
   }
 
+  function update_torrent_row(row, row_id, torrent)
+  {
+    var completed = parseInt(torrent['percent_complete']) == 100;
+    var ratio_element;
+    var ratio_colour;
+    var ratio;
+    var green;
+    var red;
+
+    if (completed && row.className.search(/complete/) == -1)
+    {
+      row.className += ' complete';
+    }
+    document.getElementById('percent_complete-' + row_id).innerHTML = torrent["percent_complete"];
+    document.getElementById('time_remaining-' + row_id).innerHTML = torrent["time_remaining"];
+    document.getElementById('download_rate-' + row_id).innerHTML = torrent["download_rate"];
+    document.getElementById('upload_rate-' + row_id).innerHTML = torrent["upload_rate"];
+    document.getElementById('seeders-' + row_id).innerHTML = torrent["seeders"];
+    document.getElementById('leechers-' + row_id).innerHTML = torrent["leechers"];
+    document.getElementById('downloaded-' + row_id).innerHTML = torrent["downloaded"];
+    document.getElementById('uploaded-' + row_id).innerHTML = torrent["uploaded"];
+    document.getElementById('size-' + row_id).innerHTML = torrent["size"];
+    ratio_element = document.getElementById('ratio-' + row_id)
+    ratio_element.innerHTML = torrent["ratio"];
+    if (torrent["paused"] == '1' && row.className.search(/paused/) == -1)
+    {
+      row.className = row.className + ' paused';
+      var pause_option = document.getElementById('pause_unpause-' + row_id);
+      pause_option.text = 'Resume';
+      pause_option.value = 'Resume';
+    }
+    else if (torrent["paused"] == '' && row.className.search(/paused/) >= 0)
+    {
+      row.className = row.className.replace(/paused/, '');
+      var pause_option = document.getElementById('pause_unpause-' + row_id);
+      pause_option.text = 'Pause';
+      pause_option.value = 'Pause';
+    }
+    if (torrent["ratio"] == "Inf.")
+    {
+      red = 0;
+      green = 255;
+    }
+    else
+    {
+      ratio = parseFloat(torrent["ratio"]);
+      red = 255 - (ratio * 255);  if (red < 0.0) red = 0.0;
+      green = ratio * 128; if (green > 255) green = 255;
+    }
+    var colour = '' + ((red << 16) | (green << 8) | 0).toString(16);
+    while(colour.length < 6) colour = '0' + colour;
+    ratio_element.style.color = '#' + colour;
+  }
+
+
   function add_new_torrent(torrent)
   {
     var torrents_table = document.getElementById('torrents');
     var cell_count = torrent.length + 1; // the +1 is for the action form at the end.
     var new_row = torrents_table.insertRow(torrents_table.rows.length);
+    var completed = parseInt(torrent["percent_complete"]) == 100;
+
     new_row.id = torrent["id"];
     new_row.className = (torrents_table.rows.length % 2 == 0) ? 'torrent-even' : 'torrent-odd';
+    if (completed) new_row.className += ' complete';
+
     torrent_link = document.createElement('a');
     torrent_link.href = '/torrent/' + escape(torrent["id"]);
     torrent_link.innerHTML = torrent["name"];
+
     var title_cell = new_row.insertCell(0);
     title_cell.className = 'title';
     title_cell.appendChild(torrent_link);
+
     var fields = ["percent_complete", "time_remaining", "download_rate", "upload_rate",
                   "seeders", "leechers", "downloaded", "uploaded", "size", "ratio"];
     var torrent_id = torrent["id"];
+
     for (var i = 0; i < fields.length; i++)
     {
       var cell = new_row.insertCell(i + 1);
       cell.id = fields[i] + "-" + torrent_id;
       cell.innerHTML = torrent[fields[i]];
     }
+
     var action_form = document.createElement('form');
     action_form.method = "post";
     action_form.action = "/status-action";
     action_form.encoding = 'application/x-www-form-urlencoded';
+
     var action_select = document.createElement('select');
     action_select.name = 'action';
+
     var pause_unpause = (torrent["paused"] == 1) ? "Resume" : "Pause";
     var options = [ pause_unpause, "Update", "Quit"];
+
     for (var i = 0; i < options.length; i++)
     {
       var option = document.createElement('option');
@@ -2171,23 +2172,28 @@ sub javascript
       if (options[i] == 'Pause' || options[i] == 'Resume') option.id = 'pause_unpause-' + torrent_id;
       action_select.add(option, null);
     }
+
     var submit_button = document.createElement('input');
     submit_button.type = 'submit';
     submit_button.value = 'Ok';
     submit_button.name = 'submit';
+
     var hidden  = document.createElement('input');
     hidden.type = 'hidden';
     hidden.name = 'torrent-id';
     hidden.value = torrent["id"];
+
     action_form.appendChild(hidden);
     action_form.appendChild(action_select);
     action_form.appendChild(submit_button);
+
     var form_cell = new_row.insertCell(fields.length + 1);
     form_cell.appendChild(action_form);
   }
 
-  function sort_table(table)
+  function sort_torrents_table()
   {
+    var table = document.getElementById('torrents');
     var rows = table.rows;
     var new_rows = new Array(rows.length - 1);
     for (var i = 0; i < new_rows.length; i++) new_rows[i] = rows.item(i + 1);
@@ -2208,6 +2214,21 @@ sub javascript
       current_class = current_class.replace(/torrent-(even|odd)/, new_class);
       new_rows[i].className = current_class;
       table.appendChild(new_rows[i]);
+    }
+  }
+
+  function cleanup_dead_torrents(torrent_data)
+  {
+    // Finally, go through the rows in the table and delete any that are not in the incoming data
+    var table = document.getElementById('torrents');
+    var index = 1; // Exclude the headings
+    while(index < table.rows.length)
+    {
+      var id = table.rows[index].id;
+      var found = 0;
+      for (var i = 0; i < torrent_data.length; i++) if (torrent_data[i]["id"] == id) found = 1;
+      if (found) index++;
+      else table.deleteRow(index);
     }
   }
 END_JS
