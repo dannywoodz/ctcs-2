@@ -2242,7 +2242,7 @@ td.title { text-align: left; }
 td.seed, td.leech, .paused { filter:alpha(opacity=50); opacity: 0.5; -moz-opacity:0.5; }
 td.seed { width: 1em; background-color: #3b3; }
 td.leech { width: 1em; background-color: #a22; }
-td.complete { font-weight: bold; }
+tr.complete { font-weight: bold; }
 END_CSS
 }
 __END__
