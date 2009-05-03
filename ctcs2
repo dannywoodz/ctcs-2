@@ -355,16 +355,11 @@ sub handle_request
   if ($message)
   {
     ctcs_log(LOG_DEBUG, "Message from %s: '%s'", address_of($client), $message);
-    my $function = function_to_handle_request($message, $client);
-    if ($function)
-    {
-      send_message_function($function, $client);
-    }
-    else
-    {
-      ctcs_log(LOG_WARNING, "No handler for '$message'");
-      send_message_function(\&null_writer_function, $client);
-    }
+    eval {
+      my $function = function_to_handle_request($message, $client);
+      send_message_function($function, $client) if $function;
+    };
+    ctcs_log(LOG_WARNING, $@) if $@;
   }
   else
   {
@@ -602,7 +597,7 @@ sub function_to_handle_request
     my $torrent_info = torrent_handled_by($client);
     torrent_set_status($torrent_info, $1);
     return exists($torrent_info->{size}) ?
-    null_writer_function() :
+    undef :
     writer_function(\&ctcs_request_detail_command);
   }
   elsif (/^CTDETAIL\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/)
@@ -638,7 +633,11 @@ sub function_to_handle_request
   {
     $ctcs{protocol} = $1;
   }
-  return null_writer_function();
+  else
+  {
+    die "No function to handle request '$message'\n";
+  }
+  return undef;
 }
 
 ###############################################################################
