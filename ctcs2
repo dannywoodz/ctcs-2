@@ -589,12 +589,13 @@ sub function_to_handle_request
   }
   elsif (/^CTPEERSDONE/)
   {
+    my $torrent = torrent_handled_by($client);
     ctcs_log(LOG_INFO, "Received %d peers for '%s'",
              peer_count_for($client),
-             torrent_handled_by($client)->{name});
-    $clients{$client}->{torrent}->{peers} = $clients{$client}->{torrent}->{incoming_peers};
-    delete $clients{$client}->{torrent}->{incoming_peers};
-    $clients{$client}->{torrent}->{last_peers_update} = time();
+             $torrent->{name});
+    $torrent->{peers} = $torrent->{incoming_peers};
+    delete $torrent->{incoming_peers};
+    $torrent->{last_peers_update} = time();
   }
   elsif (/^CTSTATUS\s+(.*)/)
   {
