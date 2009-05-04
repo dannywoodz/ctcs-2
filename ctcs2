@@ -301,6 +301,7 @@ sub register_new_client
 
   $clients{$client} = {};
   $clients{$client}->{messages} = [];
+  $clients{$client}->{socket}   = $client;
 
   ctcs_log(LOG_INFO,
            "connection from %s:%d",
@@ -517,16 +518,6 @@ sub writer_function
 }
 
 ###############################################################################
-# Inevitably, some requests do not require responses: this writer function
-# implementation sends no content back.
-###############################################################################
-
-sub null_writer_function
-{
-  return writer_function(sub{''});
-}
-
-###############################################################################
 # Writing is simple: for a given socket, it has a queue of functions in the
 # 'messages' subhash.  Each of these functions will return true if they finish
 # sending, and false otherwise.  Each function should be a writer_function that
@@ -545,7 +536,6 @@ sub handle_write
     last if !$function->($client);
     shift(@$messages);
   }
-
   $writers->remove($client) unless ($messages && @$messages);
 }
 
@@ -597,7 +587,7 @@ sub function_to_handle_request
     my $torrent_info = torrent_handled_by($client);
     torrent_set_status($torrent_info, $1);
     return exists($torrent_info->{size}) ?
-    null_writer_function() :
+    undef :
     writer_function(\&ctcs_request_detail_command);
   }
   elsif (/^CTDETAIL\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/)
@@ -641,7 +631,7 @@ sub function_to_handle_request
   {
     die "No function to handle request '$message'\n";
   }
-  return null_writer_function();
+  return undef;
 }
 
 ###############################################################################
@@ -1360,6 +1350,7 @@ sub handle_register_torrent
   $info->{size}                  = 0;
 
   $clients{$socket}->{torrent} = $info;
+
 }
 
 ###############################################################################
@@ -1476,7 +1467,7 @@ sub torrent_clients
   my @torrent_clients = ();
   foreach my $client (keys %clients)
   {
-    push(@torrent_clients, $client) if exists($clients{$client}->{torrent});
+    push(@torrent_clients, $clients{$client}->{socket}) if exists($clients{$client}->{torrent});
   }
   return @torrent_clients;
 }
@@ -1561,9 +1552,8 @@ sub send_message
 sub send_message_function
 {
   my ($function, $client) = @_;
-  $clients{$client}->{messages} = [] unless exists $clients{$client}->{messages};
-  push(@{$clients{$client}->{messages}}, $function);
-  $writers->add($client);
+  push (@{$clients{$client}->{messages}}, $function);
+  $writers->add($client) unless $writers->exists($client);
 }
 
 ###############################################################################
@@ -1593,7 +1583,7 @@ sub get_client_by_id
   {
     if (exists($clients{$client}->{torrent}) &&
         $clients{$client}->{torrent}->{ctcs_id} eq $id) {
-      return $client;
+      return $clients{$client}->{socket};
     }
   }
   return undef;
