@@ -597,7 +597,7 @@ sub function_to_handle_request
     my $torrent_info = torrent_handled_by($client);
     torrent_set_status($torrent_info, $1);
     return exists($torrent_info->{size}) ?
-    undef :
+    null_writer_function() :
     writer_function(\&ctcs_request_detail_command);
   }
   elsif (/^CTDETAIL\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/)
@@ -641,7 +641,7 @@ sub function_to_handle_request
   {
     die "No function to handle request '$message'\n";
   }
-  return undef;
+  return null_writer_function();
 }
 
 ###############################################################################
