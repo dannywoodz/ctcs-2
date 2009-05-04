@@ -847,7 +847,7 @@ sub json_status
                         sprintf(join(', ',
                                      ('{"id": "%s"',
                                       '"name": "%s"',
-                                      '"percent_complete": "%s%%"',
+                                      '"percent_complete": "%s"',
                                       '"time_remaining": "%s"',
                                       '"download_rate": "%s"',
                                       '"upload_rate": "%s"',
@@ -2072,7 +2072,7 @@ sub javascript
     {
       row.className += ' complete';
     }
-    document.getElementById('percent_complete-' + row_id).innerHTML = torrent["percent_complete"];
+    document.getElementById('percent_complete-' + row_id).innerHTML = torrent["percent_complete"] + '%';
     document.getElementById('time_remaining-' + row_id).innerHTML = torrent["time_remaining"];
     document.getElementById('download_rate-' + row_id).innerHTML = torrent["download_rate"];
     document.getElementById('upload_rate-' + row_id).innerHTML = torrent["upload_rate"];
@@ -2142,6 +2142,7 @@ sub javascript
       var cell = new_row.insertCell(i + 1);
       cell.id = fields[i] + "-" + torrent_id;
       cell.innerHTML = torrent[fields[i]];
+      if (fields[i] == "percent_complete") cell.innerHTML += '%';
     }
 
     var action_form = document.createElement('form');
