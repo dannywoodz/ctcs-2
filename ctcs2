@@ -51,10 +51,6 @@ messages are timestamped)
 
 Danny Woods (dannywoodz@yahoo.co.uk)
 
-=head1 DATE
-
-18-Apr-2009
-
 =head1 COPYRIGHT
 
 Copyright (c) 2009 Danny Woods
@@ -89,6 +85,7 @@ use constant FORM_ENCODING => 'application/x-www-form-urlencoded';
 $SIG{INT}  = \&cleanup;
 $SIG{TERM} = \&cleanup;
 $|         = 1;                 # Autoflush STDOUT
+$0         = 'ctcs2';
 
 my $port                    = 8080;
 my $download_limit          = 1000;
