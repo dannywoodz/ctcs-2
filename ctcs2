@@ -1303,20 +1303,17 @@ sub record_bandwidth
   my $info = torrent_handled_by($client);
   $info->{upload_rate}   = $ulrate;
   $info->{download_rate} = $dlrate;
-  my @dl_hist= @{$info->{download_rate_history}};
-  push(@dl_hist, $dlrate);
-  shift @dl_hist if $#dl_hist > 100;
-  @{$info->{download_rate_history}}= @dl_hist;
+
+  my $dl_hist= $info->{download_rate_history};
+  push(@{$dl_hist}, $dlrate);
+  shift @{$dl_hist} if $#{$dl_hist} > 100;
 
   my $smoothed_dl_rate= 0;
-  my $dl_count= $#dl_hist;
+  my $dl_count= $#{$dl_hist};
 
-  for (my $i= 0; $i < $dl_count; $i++)
-  {
-    $smoothed_dl_rate += $dl_hist[$i];
-  }
+  $smoothed_dl_rate += $_ for @{$dl_hist};
 
-  $info->{smoothed_dl_rate}= $dl_count == 0 ? 0 : $smoothed_dl_rate/$dl_count;
+  $info->{smoothed_dl_rate} = $dl_count == 0 ? 0 : $smoothed_dl_rate/$dl_count;
 
   my $total = exists($info->{total_chunks}) ? $info->{total_chunks} : 0;
   my $downloaded = exists($info->{downloaded_chunks}) ? $info->{downloaded_chunks} : 0;
