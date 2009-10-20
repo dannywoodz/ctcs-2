@@ -647,7 +647,7 @@ sub with_output_to_string(&)
   eval { $function->() };
   $| = $oldflush;
   select $oldfd;
-  die $@ if $@;
+  warn if $@;
   return ${$string->string_ref()};
 }
 
