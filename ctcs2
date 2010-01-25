@@ -161,6 +161,7 @@ my $help                    = undef;
 
 my %clients;
 my %ctcs;
+my %api;
 
 ###############################################################################
 # Command-line options
@@ -212,6 +213,39 @@ $ctcs{log_timestamps}       = !$suppress_log_timestamps;
 $ctcs{log_level}            = LOG_INFO;
 $ctcs{log_file_handle}      = \*STDOUT;
 $ctcs{auto_refresh}         = 1;
+
+###############################################################################
+# Setup the API.
+###############################################################################
+
+sub apicall(&$)
+{
+  my ($fun, $name) = @_;
+  return sub {
+    my $params = shift;
+    ctcs_log( LOG_INFO, "Processing API call '%s'", $name );
+    my @clients;
+    if ( exists($params->{torrents}) )
+    {
+      ctcs_log( LOG_DEBUG, 'API call taking torrent IDs from explicit parameters \'%s\'', $params->{torrents} );
+      foreach my $id (split(/,/, $params->{torrents}))
+      {
+	my $client = get_torrent_by_id($id);
+	push(@clients, $client) if $client;
+      }
+    }
+    else
+    {
+      ctcs_log( LOG_DEBUG, 'API call using all torrent clients' );
+      @clients = torrent_clients();
+    }
+    $fun->($params, \@clients);
+  };
+}
+
+$api{pause}  = apicall { torrent_pause(torrent_handled_by($_[0])) for @{$_[1]}  } 'pause';
+$api{resume} = apicall { torrent_resume(torrent_handled_by($_[0])) for @{$_[1]} } 'resume';
+$api{quit}   = apicall { exit(0) } 'quit';
 
 ctcs_log(LOG_INFO, "CTCS Server started on port $port");
 
@@ -811,7 +845,22 @@ sub handle_form_submission
       print $query->redirect(-uri => '/advanced-limits');
     }
   }
+  elsif ($target =~ '^/api/(.*)$')
+  {
+    my $params = $query->Vars;
+    ctcs_log(LOG_INFO, "API call '%s'", $1);
+    handle_api_call($1, $params);
+    return "HTTP/1.1 200 OK\r\n\r\n";
+  }
+
   return error_page($target);
+}
+
+sub handle_api_call
+{
+  my ($path, $params) = @_;
+  my $handler = $api{$path} || sub { ctcs_log(LOG_WARNING, "Unknown API call: '%s'", $path); };
+  $handler->($params);
 }
 
 sub page_content
@@ -1468,15 +1517,6 @@ sub torrent_clients
     push(@torrent_clients, $clients{$client}->{socket}) if exists($clients{$client}->{torrent});
   }
   return @torrent_clients;
-}
-
-###############################################################################
-# Returns the number of torrents that are registered with this server
-###############################################################################
-
-sub number_of_registered_torrents
-{
-  return scalar torrent_clients;
 }
 
 ###############################################################################
