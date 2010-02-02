@@ -63,7 +63,7 @@ BSD
 #
 ###############################################################################
 
-use IO::Socket;
+use IO::Socket qw($CRLF AF_INET SOMAXCONN SOCK_STREAM);
 use IO::Select;
 use IO::String;
 use Socket 'TCP_NODELAY';
@@ -223,6 +223,7 @@ sub apicall(&$)
   my ($fun, $name) = @_;
   return sub {
     my $params = shift;
+    my $socket = shift;
     ctcs_log( LOG_INFO, "Processing API call '%s'", $name );
     my @clients;
     if ( exists($params->{torrents}) )
@@ -239,13 +240,41 @@ sub apicall(&$)
       ctcs_log( LOG_DEBUG, 'API call using all torrent clients' );
       @clients = torrent_clients();
     }
-    $fun->($params, \@clients);
+    $fun->($params, \@clients, $socket);
   };
 }
 
-$api{pause}  = apicall { torrent_pause(torrent_handled_by($_[0])) for @{$_[1]}  } 'pause';
-$api{resume} = apicall { torrent_resume(torrent_handled_by($_[0])) for @{$_[1]} } 'resume';
-$api{quit}   = apicall { exit(0) } 'quit';
+
+###############################################################################
+# Given a list of clients returns the torrent instances for which the given
+# block evaluates to true
+###############################################################################
+
+sub torrents_satisfying_in_client_list(&@)
+{
+  my $block   = shift;
+  my @torrents;
+  foreach my $client (@_)
+  {
+    my $torrent = torrent_handled_by($client);
+    push(@torrents, $torrent) if $block->($torrent);
+  }
+  return @torrents;
+}
+
+$api{pause}   = apicall { torrent_pause(torrent_handled_by($_[0])) for @{$_[1]}  } 'pause';
+$api{resume}  = apicall { torrent_resume(torrent_handled_by($_[0])) for @{$_[1]} } 'resume';
+$api{update}  = apicall { torrent_update(torrent_handled_by($_[0])) for @{$_[1]} } 'update';
+$api{count}   = apicall { send_http_message(scalar @{$_[1]}, $_[2]) } 'count';
+$api{paused}  = apicall {
+  my $message = join($CRLF, map { join(':', $_->{ctcs_id}, $_->{name}) } torrents_satisfying_in_client_list { torrent_is_paused(shift) } @{$_[1]});
+  send_http_message($message, $_[2]);
+} 'paused';
+$api{active}  = apicall {
+  my $message = join($CRLF, map { join(':', $_->{ctcs_id}, $_->{name}) } torrents_satisfying_in_client_list { !torrent_is_paused(shift) } @{$_[1]});
+  send_http_message($message, $_[2]);
+} 'active';
+$api{quit}    = apicall { exit(0) } 'quit';
 
 ctcs_log(LOG_INFO, "CTCS Server started on port $port");
 
@@ -849,7 +878,7 @@ sub handle_form_submission
   {
     my $params = $query->Vars;
     ctcs_log(LOG_INFO, "API call '%s'", $1);
-    handle_api_call($1, $params);
+    handle_api_call($1, $params, $client);
     return "HTTP/1.1 200 OK\r\n\r\n";
   }
 
@@ -858,9 +887,9 @@ sub handle_form_submission
 
 sub handle_api_call
 {
-  my ($path, $params) = @_;
+  my ($path, $params, $client) = @_;
   my $handler = $api{$path} || sub { ctcs_log(LOG_WARNING, "Unknown API call: '%s'", $path); };
-  $handler->($params);
+  $handler->($params, $client);
 }
 
 sub page_content
@@ -1580,6 +1609,23 @@ sub send_message
 {
   my ($message, $client) = @_;
   send_message_function(writer_function(sub { $message }), $client);
+}
+
+###############################################################################
+# Sends a message preceded by appropriate HTTP headers
+###############################################################################
+
+sub send_http_message
+{
+  my ($message, $client) = @_;
+  send_message(sprintf(join($CRLF, ('HTTP/1.1 200 OK',
+                                    'Content-Type: text/plain',
+                                    'Content-Length: %d',
+                                    '',
+                                    '%s')),
+                       length($message),
+                       $message),
+              $client);
 }
 
 ###############################################################################
