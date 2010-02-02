@@ -218,6 +218,25 @@ $ctcs{auto_refresh}         = 1;
 # Setup the API.
 ###############################################################################
 
+###############################################################################
+# apicall is a bit of a tongue-twister.  It should be given a block to execute,
+# and a name to be associated with.  It doesn't actually do anything, but
+# insteads builds and returns a function that's suitable for answering
+# requests.
+#
+# This returned function expects to be called with three parameters:
+# - the HTTP params associated with the request that triggered the call
+# - a list reference of torrents (elements of the %clients hash)
+# - the client socket that triggered the request, in case an answer is required
+#
+# What the returned function *does* is entirely up to the block that is given
+# to apicall:  that block is invoked with the above parameters.
+#
+# The list of torrents will either be the complete list of those registered
+# with the server, or a list filtered by the 'torrents' parameter of the given
+# HTTP parameters (which itself should be a comma-separated list of ids).
+###############################################################################
+
 sub apicall(&$)
 {
   my ($fun, $name) = @_;
@@ -225,53 +244,42 @@ sub apicall(&$)
     my $params = shift;
     my $socket = shift;
     ctcs_log( LOG_INFO, "Processing API call '%s'", $name );
-    my @clients;
+    my @torrents;
     if ( exists($params->{torrents}) )
     {
       ctcs_log( LOG_DEBUG, 'API call taking torrent IDs from explicit parameters \'%s\'', $params->{torrents} );
       foreach my $id (split(/,/, $params->{torrents}))
       {
-	my $client = get_torrent_by_id($id);
-	push(@clients, $client) if $client;
+	my $torrent = get_torrent_by_id($id);
+	push(@torrents, $torrent) if $torrent;
       }
     }
     else
     {
       ctcs_log( LOG_DEBUG, 'API call using all torrent clients' );
-      @clients = torrent_clients();
+      @torrents = all_torrents();
     }
-    $fun->($params, \@clients, $socket);
+    $fun->($params, \@torrents, $socket);
   };
 }
 
-
 ###############################################################################
-# Given a list of clients returns the torrent instances for which the given
-# block evaluates to true
+# Functions returned by apicall have three parameters:
+# - the HTTP parameters of the request that triggered the call
+# - a list reference of torrent instances (elements of the %clients hash)
+# - a client socket that initiated the request
 ###############################################################################
 
-sub torrents_satisfying_in_client_list(&@)
-{
-  my $block   = shift;
-  my @torrents;
-  foreach my $client (@_)
-  {
-    my $torrent = torrent_handled_by($client);
-    push(@torrents, $torrent) if $block->($torrent);
-  }
-  return @torrents;
-}
-
-$api{pause}   = apicall { torrent_pause(torrent_handled_by($_[0])) for @{$_[1]}  } 'pause';
-$api{resume}  = apicall { torrent_resume(torrent_handled_by($_[0])) for @{$_[1]} } 'resume';
-$api{update}  = apicall { torrent_update(torrent_handled_by($_[0])) for @{$_[1]} } 'update';
+$api{pause}   = apicall { torrent_pause($_)  for @{$_[1]} } 'pause';
+$api{resume}  = apicall { torrent_resume($_) for @{$_[1]} } 'resume';
+$api{update}  = apicall { torrent_update($_) for @{$_[1]} } 'update';
 $api{count}   = apicall { send_http_message(scalar @{$_[1]}, $_[2]) } 'count';
 $api{paused}  = apicall {
-  my $message = join($CRLF, map { join(':', $_->{ctcs_id}, $_->{name}) } torrents_satisfying_in_client_list { torrent_is_paused(shift) } @{$_[1]});
+  my $message = join($CRLF, map { join(':', $_->{ctcs_id}, $_->{name}) } grep { torrent_is_paused($_) } @{$_[1]});
   send_http_message($message, $_[2]);
 } 'paused';
 $api{active}  = apicall {
-  my $message = join($CRLF, map { join(':', $_->{ctcs_id}, $_->{name}) } torrents_satisfying_in_client_list { !torrent_is_paused(shift) } @{$_[1]});
+  my $message = join($CRLF, map { join(':', $_->{ctcs_id}, $_->{name}) } grep { !torrent_is_paused($_) } @{$_[1]});
   send_http_message($message, $_[2]);
 } 'active';
 $api{quit}    = apicall { exit(0) } 'quit';
@@ -1534,6 +1542,15 @@ sub torrent_handled_by
 }
 
 ###############################################################################
+# Return all torrent instances currently registered with this server
+###############################################################################
+
+sub all_torrents
+{
+  grep { exists($clients{$_}->{torrent}) } keys %clients;
+}
+
+###############################################################################
 # Returns a list of sockets that are supplying torrent data (as opposed to
 # connections from the Web interface
 ###############################################################################
@@ -1612,20 +1629,26 @@ sub send_message
 }
 
 ###############################################################################
-# Sends a message preceded by appropriate HTTP headers
+# Sends a message preceded by appropriate HTTP headers.  An optional third
+# argument can be a hash with specific HTTP headers to set.  Unless overridden,
+# the default content type is text/plain.  Do NOT specify a 'Content-Length':
+# it will be generated automatically.  The Content Type should be overridden
+# with the 'Content-Type' key.
 ###############################################################################
 
 sub send_http_message
 {
-  my ($message, $client) = @_;
-  send_message(sprintf(join($CRLF, ('HTTP/1.1 200 OK',
-                                    'Content-Type: text/plain',
-                                    'Content-Length: %d',
-                                    '',
-                                    '%s')),
-                       length($message),
-                       $message),
-              $client);
+  my ($message, $client, %headers) = @_;
+  my $http_message = IO::String->new();
+
+  $headers{'Content-Type'} ||= 'text/plain';
+
+  print $http_message 'HTTP/1.1 200 OK', $CRLF;
+  map { print $http_message $_, ': ', $headers{$_}, $CRLF } keys %headers;
+  print $http_message 'Content-Length: ', length($message), $CRLF, $CRLF;
+  print $http_message $message;
+
+  send_message( ${$http_message->string_ref()}, $client);
 }
 
 ###############################################################################
