@@ -1547,7 +1547,7 @@ sub torrent_handled_by
 
 sub all_torrents
 {
-  grep { exists($clients{$_}->{torrent}) } keys %clients;
+  map { $clients{$_}->{torrent} } grep { exists($clients{$_}->{torrent}) } keys %clients;
 }
 
 ###############################################################################
