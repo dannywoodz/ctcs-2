@@ -294,8 +294,8 @@ $api{active}  = apicall {
 $api{bandwidth} = apicall {
   my $upload_limit = $_[0]->{upload_limit};
   my $download_limit = $_[0]->{download_limit};
-  $ctcs{download_limit} = $download_limit if $download_limit =~ /^0*\d+$/;
-  $ctcs{upload_limit} = $upload_limit if $upload_limit =~ /^0*\d+$/;
+  $ctcs{download_limit} = $download_limit and ctcs_log( LOG_INFO, "Setting download limit to %d", $download_limit) if $download_limit =~ /^0*\d+$/;
+  $ctcs{upload_limit} = $upload_limit and ctcs_log( LOG_INFO, "Setting upload limit to %d", $upload_limit) if $upload_limit =~ /^0*\d+$/;
   autobalance_bandwidth();
 } 'bandwidth';
 
@@ -900,7 +900,7 @@ sub handle_form_submission
   elsif ($target =~ '^/api/(.*)$')
   {
     my $params = $query->Vars;
-    ctcs_log(LOG_INFO, "API call '%s'", $1);
+    ctcs_log(LOG_DEBUG, "API call '%s'", $1);
     handle_api_call($1, $params, $client);
     return "HTTP/1.1 200 OK\r\n\r\n";
   }
