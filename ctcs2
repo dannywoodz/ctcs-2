@@ -265,39 +265,7 @@ sub apicall(&$)
   };
 }
 
-###############################################################################
-# Functions returned by apicall have four parameters:
-# - the HTTP parameters of the request that triggered the call
-# - a list reference of torrent instances (elements of the %clients hash)
-# - a client socket that initiated the request
-# - a boolean flag indicating whether the torrent list is expicit or assumed
-###############################################################################
-
-$api{pause}   = apicall { torrent_pause($_)  for @{$_[1]} } 'pause';
-$api{resume}  = apicall { torrent_resume($_) for @{$_[1]} } 'resume';
-$api{update}  = apicall { torrent_update($_) for @{$_[1]} } 'update';
-$api{count}   = apicall { send_http_message(scalar @{$_[1]}, $_[2]) } 'count';
-$api{exit}    = apicall { exit(0) } 'exit';
-$api{quit}    = apicall {
-  if ($_[3]) {
-    torrent_quit($_) for @{$_[1]};
-  }
-} 'quit';
-$api{paused}  = apicall {
-  my $message = join($CRLF, map { join(':', $_->{ctcs_id}, $_->{name}) } grep { torrent_is_paused($_) } @{$_[1]});
-  send_http_message($message, $_[2]);
-} 'paused';
-$api{active}  = apicall {
-  my $message = join($CRLF, map { join(':', $_->{ctcs_id}, $_->{name}) } grep { !torrent_is_paused($_) } @{$_[1]});
-  send_http_message($message, $_[2]);
-} 'active';
-$api{bandwidth} = apicall {
-  my $upload_limit = $_[0]->{upload_limit};
-  my $download_limit = $_[0]->{download_limit};
-  $ctcs{download_limit} = $download_limit and ctcs_log( LOG_INFO, "Setting download limit to %d", $download_limit) if $download_limit =~ /^0*\d+$/;
-  $ctcs{upload_limit} = $upload_limit and ctcs_log( LOG_INFO, "Setting upload limit to %d", $upload_limit) if $upload_limit =~ /^0*\d+$/;
-  autobalance_bandwidth();
-} 'bandwidth';
+setup_api(\%api);
 
 ctcs_log(LOG_INFO, "CTCS Server started on port $port");
 
@@ -2103,6 +2071,69 @@ sub peer_count_for
 {
   my $info = torrent_handled_by(shift);
   return scalar @{$info->{peers}}
+}
+
+sub setup_api
+{
+  my $api = shift;
+
+  ###############################################################################
+  # Functions returned by apicall have four parameters:
+  # - the HTTP parameters of the request that triggered the call
+  # - a list reference of torrent instances (elements of the %clients hash)
+  # - a client socket that initiated the request
+  # - a boolean flag indicating whether the torrent list is expicit or assumed
+  ###############################################################################
+
+  $api->{pause}   = apicall { torrent_pause($_)  for @{$_[1]}; send_http_message('Pausing', $_[2])  } 'pause';
+  $api->{resume}  = apicall { torrent_resume($_) for @{$_[1]}; send_http_message('Resuming', $_[2]) } 'resume';
+  $api->{update}  = apicall { torrent_update($_) for @{$_[1]}; send_http_message('Updating', $_[2]) } 'update';
+  $api->{count}   = apicall { send_http_message(scalar @{$_[1]}, $_[2]) } 'count';
+
+  $api->{exit}    = apicall { print { $_[2] } "CTCS exiting"; exit(0) } 'exit';
+
+  $api->{quit}    = apicall {
+    return unless $_[3];	# No default 'quit all' behaviour.
+    my $message = join($CRLF, map { "Quit " . $_->{name} } @{$_[1]});
+    torrent_quit($_) for @{$_[1]};
+    send_http_message($message, $_[2]);
+  } 'quit';
+
+  $api->{paused}  = apicall {
+    my $message = join($CRLF, map { $_->{ctcs_id} . ':' . $_->{name} } grep { torrent_is_paused($_) } @{$_[1]});
+    send_http_message($message, $_[2]);
+  } 'paused';
+
+  $api->{active}  = apicall {
+    my $message = join($CRLF, map { $_->{ctcs_id} . ':' . $_->{name} } grep { !torrent_is_paused($_) } @{$_[1]});
+    send_http_message($message, $_[2]);
+  } 'active';
+
+  $api->{torrents} = apicall {
+    my $message = join($CRLF, map { $_->{ctcs_id} . ':' . $_->{name} } @{$_[1]});
+    send_http_message($message, $_[2]);
+  } 'torrents';
+
+  $api->{'get-bandwidth'} = apicall {
+    send_http_message(sprintf('upload-limit:%d;download-limit:%d', $ctcs{upload_limit}, $ctcs{download_limit}), $_[2]);
+  } 'get-bandwidth';
+
+  $api->{'set-bandwidth'} = apicall {
+    my $upload_limit = $_[0]->{'upload-limit'};
+    my $download_limit = $_[0]->{'download-limit'};
+    if ( defined($download_limit) && $download_limit =~ /^0*\d+$/ )
+    {
+      $ctcs{download_limit} = $download_limit;
+      ctcs_log( LOG_INFO, 'Setting download limit to %d', $download_limit);
+    }
+    if ( defined($upload_limit) && $upload_limit =~ /^0*\d+$/ )
+    {
+      $ctcs{upload_limit} = $upload_limit;
+      ctcs_log( LOG_INFO, 'Setting upload limit to %d', $upload_limit);
+    }
+    autobalance_bandwidth();
+    send_http_message(sprintf('upload-limit:%d;download-limit:%d', $ctcs{upload_limit}, $ctcs{download_limit}), $_[2]);
+  } 'set-bandwidth';
 }
 
 sub javascript
