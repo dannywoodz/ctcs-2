@@ -53,7 +53,7 @@ Danny Woods (dannywoodz@yahoo.co.uk)
 
 =head1 COPYRIGHT
 
-Copyright (c) 2009 Danny Woods
+Copyright (c) 2009-2010 Danny Woods
 
 =head1 LICENCE
 
@@ -245,6 +245,7 @@ sub apicall(&$)
     my $socket = shift;
     ctcs_log( LOG_INFO, "Processing API call '%s'", $name );
     my @torrents;
+    my $explicit_parameters = 0;
     if ( exists($params->{torrents}) )
     {
       ctcs_log( LOG_DEBUG, 'API call taking torrent IDs from explicit parameters \'%s\'', $params->{torrents} );
@@ -253,27 +254,31 @@ sub apicall(&$)
 	my $torrent = get_torrent_by_id($id);
 	push(@torrents, $torrent) if $torrent;
       }
+      $explicit_parameters = 1;
     }
     else
     {
       ctcs_log( LOG_DEBUG, 'API call using all torrent clients' );
       @torrents = all_torrents();
     }
-    $fun->($params, \@torrents, $socket);
+    $fun->($params, \@torrents, $socket, $explicit_parameters);
   };
 }
 
 ###############################################################################
-# Functions returned by apicall have three parameters:
+# Functions returned by apicall have four parameters:
 # - the HTTP parameters of the request that triggered the call
 # - a list reference of torrent instances (elements of the %clients hash)
 # - a client socket that initiated the request
+# - a boolean flag indicating whether the torrent list is expicit or assumed
 ###############################################################################
 
 $api{pause}   = apicall { torrent_pause($_)  for @{$_[1]} } 'pause';
 $api{resume}  = apicall { torrent_resume($_) for @{$_[1]} } 'resume';
 $api{update}  = apicall { torrent_update($_) for @{$_[1]} } 'update';
 $api{count}   = apicall { send_http_message(scalar @{$_[1]}, $_[2]) } 'count';
+$api{quit}    = apicall { (torrent_quit($_) for @{$_[1]}) if $_[3] } 'quit'; # Don't allow default quit behaviour
+$api{exit}    = apicall { exit(0) } 'exit';
 $api{paused}  = apicall {
   my $message = join($CRLF, map { join(':', $_->{ctcs_id}, $_->{name}) } grep { torrent_is_paused($_) } @{$_[1]});
   send_http_message($message, $_[2]);
@@ -282,7 +287,6 @@ $api{active}  = apicall {
   my $message = join($CRLF, map { join(':', $_->{ctcs_id}, $_->{name}) } grep { !torrent_is_paused($_) } @{$_[1]});
   send_http_message($message, $_[2]);
 } 'active';
-$api{quit}    = apicall { exit(0) } 'quit';
 
 ctcs_log(LOG_INFO, "CTCS Server started on port $port");
 
@@ -2369,7 +2373,7 @@ __END__
 
 BSD LICENCE
 
-Copyright (c) 2009 Danny Woods
+Copyright (c) 2009-2010 Danny Woods
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -2446,12 +2450,3 @@ conditional, with a new function to handle them.
 
 Requests that are not implemented yield a warning in the logs, but otherwise
 do not hinder the operation of the server.
-
-TODOs
------
-
-*) Automatic bandwidth management is clunky right now.  Every incoming torrent
-that neither completed or paused gets an even slice of the global downoad
-bandwidth limit; same for uploads, except that completed downloads continue to
-get their slice of available bandwidth.  It would be much nicer if bandwidth
-usage was monitored over time, and slices adjusted on the fly (DIFFICULT)
