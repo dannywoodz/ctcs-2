@@ -2132,7 +2132,7 @@ sub setup_api
       ctcs_log( LOG_INFO, 'Setting upload limit to %d', $upload_limit);
     }
     autobalance_bandwidth();
-    send_http_message(sprintf('upload-limit:%d;download-limit:%d', $ctcs{upload_limit}, $ctcs{download_limit}), $_[2]);
+    $api->{'get-bandwidth'}->($_[0], $_[2]);
   } 'set-bandwidth';
 }
 
