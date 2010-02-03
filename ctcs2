@@ -277,7 +277,11 @@ $api{pause}   = apicall { torrent_pause($_)  for @{$_[1]} } 'pause';
 $api{resume}  = apicall { torrent_resume($_) for @{$_[1]} } 'resume';
 $api{update}  = apicall { torrent_update($_) for @{$_[1]} } 'update';
 $api{count}   = apicall { send_http_message(scalar @{$_[1]}, $_[2]) } 'count';
-$api{quit}    = apicall { (torrent_quit($_) for @{$_[1]}) if $_[3] } 'quit'; # Don't allow default quit behaviour
+$api{quit}    = apicall {
+  if ($_[3]) {
+    torrent_quit($_) for @{$_[1]};
+  }
+} 'quit';
 $api{exit}    = apicall { exit(0) } 'exit';
 $api{paused}  = apicall {
   my $message = join($CRLF, map { join(':', $_->{ctcs_id}, $_->{name}) } grep { torrent_is_paused($_) } @{$_[1]});
