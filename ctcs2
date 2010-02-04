@@ -2114,11 +2114,11 @@ sub setup_api
     send_http_message($message, $_[2]);
   } 'torrents';
 
-  $api->{'get-bandwidth'} = apicall {
+  $api->{'get-bandwidth-limits'} = apicall {
     send_http_message(sprintf('upload-limit:%d;download-limit:%d', $ctcs{upload_limit}, $ctcs{download_limit}), $_[2]);
-  } 'get-bandwidth';
+  } 'get-bandwidth-limits';
 
-  $api->{'set-bandwidth'} = apicall {
+  $api->{'set-bandwidth-limits'} = apicall {
     my $upload_limit = $_[0]->{'upload-limit'};
     my $download_limit = $_[0]->{'download-limit'};
     if ( defined($download_limit) && $download_limit =~ /^0*\d+$/ )
@@ -2132,8 +2132,12 @@ sub setup_api
       ctcs_log( LOG_INFO, 'Setting upload limit to %d', $upload_limit);
     }
     autobalance_bandwidth();
-    $api->{'get-bandwidth'}->($_[0], $_[2]);
-  } 'set-bandwidth';
+    $api->{'get-bandwidth-limits'}->($_[0], $_[2]);
+  } 'set-bandwidth-limits';
+
+  $api->{'get-bandwidth-totals'} = apicall {
+    send_http_message(sprintf('downloading:%d;uploading:%d', total_used_bandwidth()), $_[2]);
+  } 'get-bandwidth-totals';
 }
 
 sub javascript
