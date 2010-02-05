@@ -161,7 +161,6 @@ my $help                    = undef;
 
 my %clients;
 my %ctcs;
-my %api;
 
 ###############################################################################
 # Command-line options
@@ -265,7 +264,7 @@ sub apicall(&$)
   };
 }
 
-setup_api(\%api);
+setup_api(\%ctcs);
 
 ctcs_log(LOG_INFO, "CTCS Server started on port $port");
 
@@ -879,7 +878,7 @@ sub handle_form_submission
 sub handle_api_call
 {
   my ($path, $params, $client) = @_;
-  my $handler = $api{$path} || sub { ctcs_log(LOG_WARNING, "Unknown API call: '%s'", $path); };
+  my $handler = $ctcs{api}->{$path} || sub { ctcs_log(LOG_WARNING, "Unknown API call: '%s'", $path); };
   $handler->($params, $client);
 }
 
@@ -2087,7 +2086,8 @@ sub peer_count_for
 
 sub setup_api
 {
-  my $api = shift;
+  my $server = shift;
+  my $api = $server->{api} = {};
 
   ###############################################################################
   # The block given to apicall is given four parameters:
