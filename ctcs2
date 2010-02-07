@@ -236,13 +236,12 @@ $ctcs{auto_refresh}         = 1;
 # HTTP parameters (which itself should be a comma-separated list of ids).
 ###############################################################################
 
-sub apicall(&$)
+sub apicall(&)
 {
-  my ($fun, $name) = @_;
+  my $fun = shift;
   return sub {
     my $params = shift;
     my $socket = shift;
-    ctcs_log( LOG_INFO, "Processing API call '%s'", $name );
     my @torrents;
     my $explicit_parameters = 0;
     if ( exists($params->{torrents}) )
@@ -867,7 +866,7 @@ sub handle_form_submission
   elsif ($target =~ '^/api/(.*)$')
   {
     my $params = $query->Vars;
-    ctcs_log(LOG_DEBUG, "API call '%s'", $1);
+    ctcs_log(LOG_INFO, "Processing API call '%s'", $1);
     handle_api_call($1, $params, $client);
     return "HTTP/1.1 200 OK\r\n\r\n";
   }
@@ -903,45 +902,55 @@ sub json_status
 {
   my $torrent_id = shift;
   my $status = IO::String->new();
-  print $status sprintf('{ "download": "%s", "upload": "%s", "torrents": [',
+  print $status sprintf('{ "download": "%s", "upload": "%s", "torrents": ',
                         map { human_readable($_) . '/s' } total_used_bandwidth());
-
-  printf $status join(',',
-                      map {
-                        my $torrent = torrent_handled_by($_);
-                        sprintf(join(', ',
-                                     ('{"id": "%s"',
-                                      '"name": "%s"',
-                                      '"percent_complete": "%s"',
-                                      '"time_remaining": "%s"',
-                                      '"download_rate": "%s"',
-                                      '"upload_rate": "%s"',
-                                      '"seeders": "%s"',
-                                      '"leechers": "%s"',
-                                      '"downloaded": "%s"',
-                                      '"uploaded": "%s"',
-                                      '"size": "%s"',
-                                      '"ratio": "%s"',
-                                      '"paused": "%s"}')),
-                                ($torrent->{ctcs_id},
-                                 $torrent->{name},
-                                 $torrent->{percent_complete},
-                                 calculate_time_remaining($torrent->{downloaded_chunks},
-                                                          $torrent->{total_chunks},
-                                                          $torrent->{piece_size},
-                                                          $torrent->{smoothed_dl_rate}),
-                                 human_readable($torrent->{download_rate}) . '/s',
-                                 human_readable($torrent->{upload_rate}) . '/s',
-                                 ($torrent->{active_seeders} . '/' . $torrent->{total_seeders}),
-                                 ($torrent->{active_leechers} . '/' . $torrent->{total_leechers}),
-                                 human_readable($torrent->{downloaded}, '0.2f'),
-                                 human_readable($torrent->{uploaded}, '0.2f'),
-                                 human_readable($torrent->{size}, 'd', '0.2f'),
-                                 formatted_ratio_for($torrent),
-                                 torrent_is_paused($torrent)))
-                      } torrent_clients());
-  print $status ']}';
+  printf $status json_status_of_multiple_torrents(all_torrents());
+  print $status '}';
   return ${$status->string_ref()};
+}
+
+sub json_status_of_multiple_torrents
+{
+  my $status = IO::String->new();
+  print $status '[';
+  print $status join(',', map { json_status_of_single_torrent($_) } @_);
+  print $status ']';
+  return ${$status->string_ref};
+}
+
+sub json_status_of_single_torrent
+{
+  my $torrent = shift;
+  sprintf(join(', ',
+	       ('{"id": "%s"',
+		'"name": "%s"',
+		'"percent_complete": "%s"',
+		'"time_remaining": "%s"',
+		'"download_rate": "%s"',
+		'"upload_rate": "%s"',
+		'"seeders": "%s"',
+		'"leechers": "%s"',
+		'"downloaded": "%s"',
+		'"uploaded": "%s"',
+		'"size": "%s"',
+		'"ratio": "%s"',
+		'"paused": "%s"}')),
+	  ($torrent->{ctcs_id},
+	   $torrent->{name},
+	   $torrent->{percent_complete},
+	   calculate_time_remaining($torrent->{downloaded_chunks},
+				    $torrent->{total_chunks},
+				    $torrent->{piece_size},
+				    $torrent->{smoothed_dl_rate}),
+	   human_readable($torrent->{download_rate}) . '/s',
+	   human_readable($torrent->{upload_rate}) . '/s',
+	   ($torrent->{active_seeders} . '/' . $torrent->{total_seeders}),
+	   ($torrent->{active_leechers} . '/' . $torrent->{total_leechers}),
+	   human_readable($torrent->{downloaded}, '0.2f'),
+	   human_readable($torrent->{uploaded}, '0.2f'),
+	   human_readable($torrent->{size}, 'd', '0.2f'),
+	   formatted_ratio_for($torrent),
+	   torrent_is_paused($torrent)));
 }
 
 ###############################################################################
@@ -2100,43 +2109,46 @@ sub setup_api
   # - a client socket that initiated the request
   ###############################################################################
 
-  $api->{pause}   = apicall { torrent_pause($_)  for @{$_[1]}; send_http_message('Pausing', $_[2])  } 'pause';
-  $api->{resume}  = apicall { torrent_resume($_) for @{$_[1]}; send_http_message('Resuming', $_[2]) } 'resume';
-  $api->{update}  = apicall { torrent_update($_) for @{$_[1]}; send_http_message('Updating', $_[2]) } 'update';
-  $api->{count}   = apicall { send_http_message(scalar @{$_[1]}, $_[2]) } 'count';
+  $api->{pause}   = apicall { torrent_pause($_)  for @{$_[1]}; send_http_message('Pausing', $_[2])  };
+  $api->{resume}  = apicall { torrent_resume($_) for @{$_[1]}; send_http_message('Resuming', $_[2]) };
+  $api->{update}  = apicall { torrent_update($_) for @{$_[1]}; send_http_message('Updating', $_[2]) };
+  $api->{count}   = apicall { send_http_message(scalar @{$_[1]}, $_[2]) };
+  $api->{'torrent-status'} = apicall {
+    send_http_message(json_status_of_multiple_torrents(@{$_[1]}), $_[2])
+    };
 
   $api->{exit}    = apicall {
     # Can't just use send_http_message, as it wouldn't be actioned until the
     # next write cycle (which isn't going to happen as we're about to exit)
     print { $_[2] } prepare_http_message("CTCS exiting");
     exit(0);
-  } 'exit';
+  };
 
   $api->{quit}    = apicall {
     return unless $_[3];	# No default 'quit all' behaviour.
     my $message = join($CRLF, map { "Quit " . $_->{name} } @{$_[1]});
     torrent_quit($_) for @{$_[1]};
     send_http_message($message, $_[2]);
-  } 'quit';
+  };
 
   $api->{paused}  = apicall {
     my $message = join($CRLF, map { $_->{ctcs_id} . ':' . $_->{name} } grep { torrent_is_paused($_) } @{$_[1]});
     send_http_message($message, $_[2]);
-  } 'paused';
+  };
 
   $api->{active}  = apicall {
     my $message = join($CRLF, map { $_->{ctcs_id} . ':' . $_->{name} } grep { !torrent_is_paused($_) } @{$_[1]});
     send_http_message($message, $_[2]);
-  } 'active';
+  };
 
   $api->{torrents} = apicall {
     my $message = join($CRLF, map { $_->{ctcs_id} . ':' . $_->{name} } @{$_[1]});
     send_http_message($message, $_[2]);
-  } 'torrents';
+  };
 
   $api->{'get-bandwidth-limits'} = apicall {
     send_http_message(sprintf('upload-limit:%d;download-limit:%d', $ctcs{upload_limit}, $ctcs{download_limit}), $_[2]);
-  } 'get-bandwidth-limits';
+  };
 
   $api->{'set-bandwidth-limits'} = apicall {
     my $upload_limit = $_[0]->{'upload-limit'};
@@ -2153,11 +2165,11 @@ sub setup_api
     }
     autobalance_bandwidth();
     $api->{'get-bandwidth-limits'}->($_[0], $_[2]);
-  } 'set-bandwidth-limits';
+  };
 
   $api->{'get-bandwidth-totals'} = apicall {
     send_http_message(sprintf('downloading:%d;uploading:%d', total_used_bandwidth()), $_[2]);
-  } 'get-bandwidth-totals';
+  };
 }
 
 sub javascript
