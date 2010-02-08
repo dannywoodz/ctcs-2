@@ -991,7 +991,11 @@ sub json_encode_to_stream
   }
   else
   {
-    if ( $entity =~ /^\d+(?:\.\d+)?$/ )
+    if ( !defined($entity) )
+    {
+      print $stream 'null';
+    }
+    elsif ( $entity =~ /^\d+(?:\.\d+)?$/ )
     {
       print $stream $entity;
     }
