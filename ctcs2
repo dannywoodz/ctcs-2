@@ -954,6 +954,58 @@ sub json_status_of_single_torrent
 }
 
 ###############################################################################
+# A convenience function to encode an arbitrary structure of Perl strings,
+# array refs and hashrefs as a JSON formatted string
+###############################################################################
+
+sub json_encode
+{
+  return ${json_encode_to_stream(shift, IO::String->new())->string_ref()};
+}
+
+sub json_encode_to_stream
+{
+  my $entity = shift;
+  my $stream = shift;
+  my $type   = ref($entity);
+
+  if ( $type eq 'ARRAY' )
+  {
+    print $stream '[';
+    json_encode_to_stream($_, $stream) && print $stream ',' for @$entity;
+    $stream->pos($stream->pos() - 1) unless scalar @$entity == 0;
+    print $stream ']';
+  }
+  elsif ( $type eq 'HASH' )
+  {
+    print $stream '{';
+    while ( my ($key, $value) = each %$entity)
+    {
+      json_encode_to_stream($key, $stream);
+      print $stream ':';
+      json_encode_to_stream($value, $stream);
+      print $stream ',';
+    }
+    $stream->pos($stream->pos() - 1);
+    print $stream '}';
+  }
+  else
+  {
+    if ( $entity =~ /^\d+(?:\.\d+)?$/ )
+    {
+      print $stream $entity;
+    }
+    else
+    {
+      printf $stream '"%s"', $entity;
+    }
+  }
+
+  return $stream;
+}
+
+
+###############################################################################
 # Given a number of seconds, returns a string of format: H:MM:SS
 ###############################################################################
 
@@ -2093,12 +2145,18 @@ sub peer_count_for
   return scalar @{$info->{peers}}
 }
 
+sub torrent_summary
+{
+  my $torrent = shift;
+  return { 'id' => $torrent->{ctcs_id}, 'name' => $torrent->{name} };
+}
+
 sub setup_api
 {
   my $server = shift;
   my $api = $server->{api} = {};
 
-  ###############################################################################
+  ##############################################################################
   # The block given to apicall is given four parameters:
   # - the HTTP parameters of the request that triggered the call
   # - a list reference of torrent instances (elements of the %clients hash)
@@ -2107,12 +2165,30 @@ sub setup_api
   # The function *returned* by apicall has two parameters:
   # - the HTTP parameters of the request that triggered the call
   # - a client socket that initiated the request
-  ###############################################################################
+  ##############################################################################
 
-  $api->{pause}   = apicall { torrent_pause($_)  for @{$_[1]}; send_http_message('Pausing', $_[2])  };
-  $api->{resume}  = apicall { torrent_resume($_) for @{$_[1]}; send_http_message('Resuming', $_[2]) };
-  $api->{update}  = apicall { torrent_update($_) for @{$_[1]}; send_http_message('Updating', $_[2]) };
-  $api->{count}   = apicall { send_http_message(scalar @{$_[1]}, $_[2]) };
+  $api->{pause}   = apicall {
+    my @paused;
+    push(@paused, torrent_summary($_)) && torrent_pause($_) for @{$_[1]};
+    my $message = json_encode({ 'action' => 'pause', 'torrents' => \@paused });
+    send_http_message($message, $_[2])
+  };
+  $api->{resume}  = apicall {
+    my @resumed;
+    push(@resumed, torrent_summary($_)) && torrent_resume($_) for @{$_[1]};
+    my $message = json_encode({ 'action' => 'resume', 'torrents' => \@resumed});
+    send_http_message($message, $_[2])
+  };
+  $api->{update}  = apicall {
+    my @updated;
+    push(@updated, torrent_summary($_)) && torrent_update($_) for @{$_[1]};
+    my $message = json_encode({ 'action' => 'update', 'torrents' => \@updated});
+    send_http_message($message, $_[2]);
+  };
+  $api->{count}   = apicall {
+    my $message = json_encode({ 'torrent-count' => scalar @{$_[1]}});
+    send_http_message($message, $_[2]);
+  };
   $api->{'torrent-status'} = apicall {
     send_http_message(json_status_of_multiple_torrents(@{$_[1]}), $_[2])
     };
@@ -2120,34 +2196,42 @@ sub setup_api
   $api->{exit}    = apicall {
     # Can't just use send_http_message, as it wouldn't be actioned until the
     # next write cycle (which isn't going to happen as we're about to exit)
-    print { $_[2] } prepare_http_message("CTCS exiting");
+    print { $_[2] } prepare_http_message(json_encode({'action' => 'CTCS exiting'}));
     exit(0);
   };
 
   $api->{quit}    = apicall {
     return unless $_[3];	# No default 'quit all' behaviour.
-    my $message = join($CRLF, map { "Quit " . $_->{name} } @{$_[1]});
-    torrent_quit($_) for @{$_[1]};
+    my @quit;
+    push(@quit, torrent_summary($_)) && torrent_quit($_) for @{$_[1]};
+    my $message = json_encode({'action' => 'quit', 'torrents' => \@quit});
     send_http_message($message, $_[2]);
   };
 
   $api->{paused}  = apicall {
-    my $message = join($CRLF, map { $_->{ctcs_id} . ':' . $_->{name} } grep { torrent_is_paused($_) } @{$_[1]});
+    my @paused;
+    push(@paused, map { torrent_summary($_) } grep { torrent_is_paused($_) } @{$_[1]});
+    my $message = json_encode({'status' => 'paused', 'torrents' => \@paused, 'count' => scalar @paused});
     send_http_message($message, $_[2]);
   };
 
   $api->{active}  = apicall {
-    my $message = join($CRLF, map { $_->{ctcs_id} . ':' . $_->{name} } grep { !torrent_is_paused($_) } @{$_[1]});
+    my @active;
+    push(@active, map { torrent_summary($_) } grep { !torrent_is_paused($_) } @{$_[1]});
+    my $message = json_encode({'status' => 'active', 'torrents' => \@active, 'count' => scalar @active});
     send_http_message($message, $_[2]);
   };
 
   $api->{torrents} = apicall {
-    my $message = join($CRLF, map { $_->{ctcs_id} . ':' . $_->{name} } @{$_[1]});
+    my @torrents;
+    push(@torrents, map { torrent_summary($_) } @{$_[1]});
+    my $message = json_encode({'status' => 'registered', 'torrents' => \@torrents, 'count' => scalar @torrents});
     send_http_message($message, $_[2]);
   };
 
   $api->{'get-bandwidth-limits'} = apicall {
-    send_http_message(sprintf('upload-limit:%d;download-limit:%d', $ctcs{upload_limit}, $ctcs{download_limit}), $_[2]);
+    my $message = json_encode({'upload-limit' => $ctcs{upload_limit}, 'download-limit' => $ctcs{download_limit}});
+    send_http_message($message, $_[2]);
   };
 
   $api->{'set-bandwidth-limits'} = apicall {
@@ -2168,7 +2252,9 @@ sub setup_api
   };
 
   $api->{'get-bandwidth-totals'} = apicall {
-    send_http_message(sprintf('downloading:%d;uploading:%d', total_used_bandwidth()), $_[2]);
+    my ($download_rate, $upload_rate) = total_used_bandwidth();
+    my $message = json_encode({'download-rate' => $download_rate, 'upload-rate' => $upload_rate});
+    send_http_message($message, $_[2]);
   };
 }
 
