@@ -218,22 +218,22 @@ $ctcs{auto_refresh}         = 1;
 ###############################################################################
 
 ###############################################################################
-# apicall is a bit of a tongue-twister.  It should be given a block to execute,
-# and a name to be associated with.  It doesn't actually do anything, but
-# insteads builds and returns a function that's suitable for answering
-# requests.
+# apicall is a bit of a tongue-twister.  It should be given a block to execute
+# when it is triggered.  This block will be fed four parameters in @_ when it
+# is called:
 #
-# This returned function expects to be called with three parameters:
 # - the HTTP params associated with the request that triggered the call
 # - a list reference of torrents (elements of the %clients hash)
 # - the client socket that triggered the request, in case an answer is required
+# - a flag indicating whether the torrents list being fed into the block
+#   was formed explicitly (from the HTTP parameters) or implicitly (taking all
+#   registered torrents in the absence of specific instructions).
 #
-# What the returned function *does* is entirely up to the block that is given
-# to apicall:  that block is invoked with the above parameters.
+# The function returned by apicall expects to be called with two paramters:
 #
-# The list of torrents will either be the complete list of those registered
-# with the server, or a list filtered by the 'torrents' parameter of the given
-# HTTP parameters (which itself should be a comma-separated list of ids).
+# - the HTTP parameters for the actual request triggering the call
+# - the client socket that initiated the call.
+#
 ###############################################################################
 
 sub apicall(&)
@@ -2161,14 +2161,11 @@ sub setup_api
   my $api = $server->{api} = {};
 
   ##############################################################################
-  # The block given to apicall is given four parameters:
+  # The block given to apicall is given four parameters in @_:
   # - the HTTP parameters of the request that triggered the call
   # - a list reference of torrent instances (elements of the %clients hash)
   # - a client socket that initiated the request
   # - a boolean flag indicating whether the torrent list is expicit or assumed
-  # The function *returned* by apicall has two parameters:
-  # - the HTTP parameters of the request that triggered the call
-  # - a client socket that initiated the request
   ##############################################################################
 
   $api->{pause}   = apicall {
