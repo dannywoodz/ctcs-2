@@ -877,7 +877,7 @@ sub handle_form_submission
 sub handle_api_call
 {
   my ($path, $params, $client) = @_;
-  my $handler = $ctcs{api}->{$path} || \&unknown_api_call;
+  my $handler = $ctcs{api}->{$path} || sub { unknown_api_call($path, $client); };
   $handler->($params, $client);
 }
 
