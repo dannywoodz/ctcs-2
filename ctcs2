@@ -2266,7 +2266,8 @@ sub setup_api
   };
 
   $api->{api} = apicall {
-    send_http_message(json_encode({'api' => \(keys %{$api})}), $_[2]);
+    my @apifuns = keys %{$api};
+    send_http_message(json_encode({'api' => \@apifuns}), $_[2]);
   };
 }
 
