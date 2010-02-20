@@ -877,8 +877,15 @@ sub handle_form_submission
 sub handle_api_call
 {
   my ($path, $params, $client) = @_;
-  my $handler = $ctcs{api}->{$path} || sub { ctcs_log(LOG_WARNING, "Unknown API call: '%s'", $path); };
+  my $handler = $ctcs{api}->{$path} || \&unknown_api_call;
   $handler->($params, $client);
+}
+
+sub unknown_api_call
+{
+  my ($path, $client) = @_;
+  ctcs_log(LOG_WARNING, "Unknown API call: '%s'", $path);
+  send_http_message(json_encode({ 'error' => "Unknown API call '$path'"}));
 }
 
 sub page_content
