@@ -80,6 +80,8 @@ use constant LOG_DEBUG     => 1;
 use constant LOG_INFO      => 2;
 use constant LOG_WARNING   => 3;
 use constant LOG_ERROR     => 4;
+use constant SUMMARY_BRIEF => 1;
+use constant SUMMARY_FULL  => 2;
 use constant FORM_ENCODING => 'application/x-www-form-urlencoded';
 
 $SIG{INT}  = \&cleanup;
@@ -907,62 +909,38 @@ sub page_content
 
 sub json_status
 {
-  my $torrent_id = shift;
-  my $status = IO::String->new();
-  print $status sprintf('{ "download": "%s", "upload": "%s", "torrents": ',
-                        map { human_readable($_) . '/s' } total_used_bandwidth());
-  printf $status json_status_of_multiple_torrents(all_torrents());
-  print $status '}';
-  return ${$status->string_ref()};
+  my ($dl, $ul) = total_used_bandwidth();
+  my @statuses  = status_of_multiple_torrents(all_torrents());
+  my $data      = { 'download' => human_readable($dl) . '/s',
+		    'upload'   => human_readable($ul) . '/s',
+		    'torrents' => \@statuses };
+  return json_encode($data);
+}
+
+sub status_of_multiple_torrents
+{
+  return my @statuses = map { status_of_single_torrent($_) } @_;
 }
 
 sub json_status_of_multiple_torrents
 {
-  my $status = IO::String->new();
-  print $status '[';
-  print $status join(',', map { json_status_of_single_torrent($_) } @_);
-  print $status ']';
-  return ${$status->string_ref};
+  my @torrents = status_of_multiple_torrents(@_);
+  return json_encode(\@torrents);
+}
+
+sub status_of_single_torrent
+{
+  torrent_summary(shift, SUMMARY_FULL);
 }
 
 sub json_status_of_single_torrent
 {
-  my $torrent = shift;
-  sprintf(join(', ',
-	       ('{"id": "%s"',
-		'"name": "%s"',
-		'"percent_complete": "%s"',
-		'"time_remaining": "%s"',
-		'"download_rate": "%s"',
-		'"upload_rate": "%s"',
-		'"seeders": "%s"',
-		'"leechers": "%s"',
-		'"downloaded": "%s"',
-		'"uploaded": "%s"',
-		'"size": "%s"',
-		'"ratio": "%s"',
-		'"paused": "%s"}')),
-	  ($torrent->{ctcs_id},
-	   $torrent->{name},
-	   $torrent->{percent_complete},
-	   calculate_time_remaining($torrent->{downloaded_chunks},
-				    $torrent->{total_chunks},
-				    $torrent->{piece_size},
-				    $torrent->{smoothed_dl_rate}),
-	   human_readable($torrent->{download_rate}) . '/s',
-	   human_readable($torrent->{upload_rate}) . '/s',
-	   ($torrent->{active_seeders} . '/' . $torrent->{total_seeders}),
-	   ($torrent->{active_leechers} . '/' . $torrent->{total_leechers}),
-	   human_readable($torrent->{downloaded}, '0.2f'),
-	   human_readable($torrent->{uploaded}, '0.2f'),
-	   human_readable($torrent->{size}, 'd', '0.2f'),
-	   formatted_ratio_for($torrent),
-	   torrent_is_paused($torrent)));
+  return json_encode(status_of_single_torrent(shift));
 }
 
 ###############################################################################
 # A convenience function to encode an arbitrary structure of Perl strings,
-# array refs and hashrefs as a JSON formatted string
+# array refs and hashrefs as a JSON formatted string.
 ###############################################################################
 
 sub json_encode
@@ -2159,7 +2137,28 @@ sub peer_count_for
 sub torrent_summary
 {
   my $torrent = shift;
-  return { 'id' => $torrent->{ctcs_id}, 'name' => $torrent->{name} };
+  my $level   = shift || SUMMARY_BRIEF;
+  my $data    = { 'id' => $torrent->{ctcs_id}, 'name' => $torrent->{name} };
+
+  if ( $level == SUMMARY_FULL )
+  {
+    $data->{percent_complete} = $torrent->{percent_complete};
+    $data->{time_remaining}   = calculate_time_remaining($torrent->{downloaded_chunks},
+							 $torrent->{total_chunks},
+							 $torrent->{piece_size},
+							 $torrent->{smoothed_dl_rate});
+    $data->{download_rate}    = human_readable($torrent->{download_rate}) . '/s';
+    $data->{upload_rate}      = human_readable($torrent->{upload_rate}) . '/s';
+    $data->{seeders}          = $torrent->{active_seeders} . '/' . $torrent->{total_seeders};
+    $data->{leechers}         = $torrent->{active_leechers} . '/' . $torrent->{total_leechers};
+    $data->{downloaded}       = human_readable($torrent->{downloaded}, '0.2f');
+    $data->{uploaded}         = human_readable($torrent->{uploaded}, '0.2f');
+    $data->{size}             = human_readable($torrent->{size}, 'd', '0.2f');
+    $data->{ratio}            = formatted_ratio_for($torrent);
+    $data->{paused}           = torrent_is_paused($torrent) ? '1' : '0';
+  }
+
+  return $data;
 }
 
 sub setup_api
@@ -2370,7 +2369,7 @@ sub javascript
     document.getElementById('uploaded-' + row_id).innerHTML = torrent["uploaded"];
     document.getElementById('size-' + row_id).innerHTML = torrent["size"];
     ratio_element = document.getElementById('ratio-' + row_id)
-    ratio_element.innerHTML = torrent["ratio"];
+    ratio_element.innerHTML = torrent["ratio"].toFixed(2);
     if (torrent["paused"] == '1' && row.className.search(/paused/) == -1)
     {
       row.className = row.className + ' paused';
