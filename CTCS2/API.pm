@@ -100,7 +100,7 @@ sub make_api_call
   if ( defined($torrent_ids) && @$torrent_ids > 0 )
   {
     $request->content_type('application/x-www-form-urlencoded');
-    $request->content('torrents=', join(',', @$torrent_ids));
+    $request->content('torrents=' . join(',', @$torrent_ids));
   }
 
   my $response = $agent->request($request);
