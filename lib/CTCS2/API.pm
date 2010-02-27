@@ -104,7 +104,7 @@ sub torrent_status
 
 sub get_bandwidth_limits
 {
-  return make_api_all(shift, 'get-bandwidth-limits');
+  return make_api_call(shift, 'get-bandwidth-limits');
 }
 
 sub set_bandwidth_limits
