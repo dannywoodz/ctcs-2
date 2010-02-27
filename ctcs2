@@ -2212,7 +2212,13 @@ sub setup_api
   };
 
   $api->{quit}    = apicall {
-    return unless $_[3];	# No default 'quit all' behaviour.
+    if ( ! $_[3] )
+    {
+      send_http_message(json_encode({'error' =>
+				     'explicit torrent ids are required for the quit API call' }),
+			$_[2]);
+      return;
+    }
     my @quit;
     push(@quit, torrent_summary($_)) && torrent_quit($_) for @{$_[1]};
     my $message = json_encode({'action' => 'quit', 'torrents' => \@quit});

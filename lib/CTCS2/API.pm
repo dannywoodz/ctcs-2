@@ -1,7 +1,7 @@
 package CTCS2::API;
 
 ###############################################################################
-# 
+#
 =pod
 
 =head1 NAME
@@ -40,11 +40,11 @@ foreach my $torrent (@{$active->{torrents}})
 my @ids = map { $_->{id} } @{$active->{torrents}};
 $api->pause(@ids);
 
-=back 4
+=back
 
 =head1 AUTHOR
 
-Danny Woods
+Danny Woods (dannywoodz@yahoo.co.uk)
 
 =head1 LICENCE
 
@@ -58,6 +58,8 @@ use HTTP::Request;
 use LWP::UserAgent;
 use JSON::XS;
 use constant URL_TEMPLATE => 'http://%s:%d/api/%s';
+
+our $AUTOLOAD;
 
 sub new
 {
@@ -100,17 +102,43 @@ sub torrent_status
   return make_api_call(shift, 'torrent-status', \@_);
 }
 
+sub get_bandwidth_limits
+{
+  return make_api_all(shift, 'get-bandwidth-limits');
+}
+
+sub set_bandwidth_limits
+{
+  my ($self, %params) = @_;
+  make_api_call($self, 'set-bandwidth-limits', undef, %params);
+}
+
+sub get_bandwidth_totals
+{
+  return make_api_call(shift, 'get-bandwidth-totals');
+}
+
+sub quit
+{
+  return make_api_call(shift, 'quit', \@_);
+}
+
 sub make_api_call
 {
-  my ($self, $call, $torrent_ids) = @_;
+  my ($self, $call, $torrent_ids, %params) = @_;
 
   my $request = HTTP::Request->new('POST', sprintf(URL_TEMPLATE, $self->{host}, $self->{port}, $call));
   my $agent   = LWP::UserAgent->new();
+  my @params;
 
-  if ( defined($torrent_ids) && @$torrent_ids > 0 )
+  push(@params, 'torrents=' . join(',', @$torrent_ids))  if defined($torrent_ids) && @$torrent_ids > 0;
+  push(@params, $_ . '=' . $params{$_}) for keys %params;
+
+
+  if ( @params > 0 )
   {
     $request->content_type('application/x-www-form-urlencoded');
-    $request->content('torrents=' . join(',', @$torrent_ids));
+    $request->content(join('&', @params));
   }
 
   my $response = $agent->request($request);
