@@ -369,9 +369,11 @@ sub register_new_client
 sub deregister_client
 {
   my $client   = shift;
-  my $hostname = address_of($client);
-  my $port     = $client->peerport();
-  if (scalar @{$clients{$client}->{messages}})
+  my $hostname = $client->opened() ? address_of($client) : "CLOSED";
+  my $port     = $client->opened() ? $client->peerport() : -1;
+  if (exists($clients{$client}) &&
+      exists($clients{$client}->{messages}) &&
+      scalar @{$clients{$client}->{messages}} > 0)
   {
     ctcs_log(LOG_WARNING, "CLIENT BEING DELETED WITH A NON-EMPTY MESSAGE QUEUE");
     my $string = IO::String->new();
@@ -1509,6 +1511,7 @@ sub line_reader_function
 
     if ($external_read_size > 0)
     {
+      return undef if not $client->opened();
       my $result = sysread($client, $buffer, $external_read_size, $buffer_length);
       return undef if !defined($result) || $result == 0;
       $buffer_length += $result;
@@ -2122,8 +2125,9 @@ sub address_of
   my $client = shift;
   unless (exists $clients{$client}->{address})
   {
-    $clients{$client}->{address} =
-    (gethostbyaddr($client->peeraddr(), AF_INET))[0];
+    $clients{$client}->{address} = $client->opened() ? 
+      (gethostbyaddr($client->peeraddr(), AF_INET))[0] :
+      "CLOSED";
   }
   return $clients{$client}->{address};
 }
