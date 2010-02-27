@@ -67,7 +67,7 @@ sub new
   $self->{host} = shift || 'localhost';
   $self->{port} = shift || 8080;
 
-  return bless($self, $class); 
+  return bless($self, $class);
 }
 
 sub pause
@@ -88,6 +88,16 @@ sub active
 sub paused
 {
   return make_api_call(shift, 'paused');
+}
+
+sub torrents
+{
+  return make_api_call(shift, 'torrents');
+}
+
+sub torrent_status
+{
+  return make_api_call(shift, 'torrent-status', \@_);
 }
 
 sub make_api_call
