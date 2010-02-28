@@ -32,10 +32,11 @@ me a note at dannywoodz@yahoo.co.uk.
 API
 ---
 
-The CTCS2 folder contains API.pm which, as the name suggests, provides programmers
-with a simple, object oriented interface to a running CTCS2 server.  It's currently
-incomplete, but I will be adding to it over time.  To use it, ensure that the folder
-containing the CTCS2 folder is in your PERL5LIB path, and simple 'use CTCS2::API;'
-from within your Perl script.
+The lib/CTCS2 folder contains API.pm which, as the name suggests, provides programmers
+with a simple, object oriented interface to a running CTCS2 server.  Run perldoc
+over the API.pm file for documentation.
+
+To use it, ensure that the folder containing the CTCS2 folder is in your PERL5LIB path,
+and simply 'use CTCS2::API;' from within your Perl script.
 
                                                            Danny
