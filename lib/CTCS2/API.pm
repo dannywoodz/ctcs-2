@@ -42,6 +42,128 @@ $api->pause(@ids);
 
 =back
 
+=head1 API METHODS
+
+=over 4
+
+=item pause
+
+By default, pauses all torrents on the server.  If supplied with one more
+torrent ids, will instead pause only those torrents.  Returns a hash
+reference with the keys 'action' and 'torrents'.  The value associated with
+'action' is 'pause'.  The value associated with 'torrents' is a list
+reference containing one hashref per torrent, with the keys 'name' and 'id'.
+
+=item resume
+
+See the documentation for 'pause' above.  The value associated with the
+'action' key is 'resume'
+
+=item update
+
+See the documentation for 'pause' above.  The value associated with the
+'action' key is 'update'
+
+=item active
+
+Returns a hashref detailing active (i.e. non-paused) torrents.  The keys
+are 'count', 'torrents' and 'status', with the values being the number of
+active torrents, a list ref of torrents (as with the 'pause' method) and
+the string 'active', respectively.
+
+=item paused
+
+As with 'active', above, but detailing paused torrents and having the value
+'paused' associated with the 'status' key.
+
+=item torrents
+
+As with 'active', above, but detailing all registered torrents, active or
+paused, and having the value 'registered' associated with the 'status' key.
+
+=item torrent_status
+
+Provides a detailed list of all registered torrents.  Returns a list reference
+of hashrefs, where each hashref describes a single torrent.  Each hashref has
+the keys 'id', 'name', 'percent_complete', 'time_remaining', 'download_rate',
+'upload_rate', 'seeders', 'leechers', 'downloaded', 'uploaded', 'size',
+'ratio' and 'paused'.
+
+If given one or more torrent ids, this method restricts the report to the
+specified torrents.
+
+=item get_bandwidth_limits
+
+Returns a hash reference with the keys 'download-limit' and 'upload-limit',
+with the values being in bytes/second.  These are the LIMITS for the server,
+not the current totals (see get_bandwidth_totals for that measure).
+
+=item set_bandwidth_limits
+
+Sets the bandwidth limits on the server, using the values attached to the keys
+'upload-limit' and 'download-limit' (measured in bytes/second) in the given
+arguments.
+
+i.e.
+
+=over 4
+
+$api->set_bandwidth_limits( 'upload-limit' => 102400 );
+
+$api->set_bandwidth_limits( 'upload-limit' => 51200, 'download-limit' => 102400 );
+
+$api->set_bandwidth_limits( 'download-limit' => 0 );
+
+=back
+
+=item get_bandwidth_totals
+
+Reports the currently used upload/download bandwidths.  The hashref returned
+has the keys 'upload-rate' and 'download-rate', with values measured in
+bytes/second.
+
+=item quit
+
+Quits the torrent(s) with the given id(s).  If given no ids, will NOT quit
+anything, but instead return a hashref with the key 'error' and the value
+'explicit torrent ids are required for the quit API call'.  With one or more
+ids, will return a hashref with the keys 'action' and 'torrents', with the
+values 'quit' and a torrent summary for each torrent quit (hashref with
+'id' and 'name' fields), respectively.
+
+=item make_api_all
+
+Allows the sending of a 'raw' API message.  All API methods ultimately use
+this method to get something done.  For example, the 'pause' method can be
+replicated as:
+
+=over 4
+
+$api->make_api_all('pause');
+
+or
+
+$api->make_api_call('pause', ['ctcs-torrent-2', 'ctcs-torrent-3']);
+
+=back
+
+This method requires at least one argument (the remote name of the API function, e.g.
+'pause' or 'quit').  The optional second parameter must be a list REFERENCE of
+torrent ids to work with (may be undef, depending on what the API function
+requires).  Any additional arguments are interpreted as key/value pairs for
+specifying HTTP params, e.g.:
+
+=over 4
+
+$api->make_api_all('set-bandwidth-limits', undef, 'upload-limit' => 51200, 'download-limit' => 0);
+
+=back
+
+Frequent use of this method implies a hole in the API interface, as it really
+shouldn't be used.
+
+=back
+
 =head1 AUTHOR
 
 Danny Woods (dannywoodz@yahoo.co.uk)
@@ -78,6 +200,11 @@ sub pause
 sub resume
 {
   return shift->make_api_call('resume', \@_);
+}
+
+sub update
+{
+  return shift->make_api_call('update', \@_);
 }
 
 sub active
