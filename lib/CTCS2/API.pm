@@ -59,8 +59,6 @@ use LWP::UserAgent;
 use JSON::XS;
 use constant URL_TEMPLATE => 'http://%s:%d/api/%s';
 
-our $AUTOLOAD;
-
 sub new
 {
   my $class = shift;
@@ -74,53 +72,52 @@ sub new
 
 sub pause
 {
-  return make_api_call(shift, 'pause', \@_);
+  return shift->make_api_call('pause', \@_);
 }
 
 sub resume
 {
-  return make_api_call(shift, 'resume', \@_);
+  return shift->make_api_call('resume', \@_);
 }
 
 sub active
 {
-  return make_api_call(shift, 'active');
+  return shift->make_api_call('active');
 }
 
 sub paused
 {
-  return make_api_call(shift, 'paused');
+  return shift->make_api_call('paused');
 }
 
 sub torrents
 {
-  return make_api_call(shift, 'torrents');
+  return shift->make_api_call('torrents');
 }
 
 sub torrent_status
 {
-  return make_api_call(shift, 'torrent-status', \@_);
+  return shift->make_api_call('torrent-status', \@_);
 }
 
 sub get_bandwidth_limits
 {
-  return make_api_call(shift, 'get-bandwidth-limits');
+  return shift->make_api_call('get-bandwidth-limits');
 }
 
 sub set_bandwidth_limits
 {
-  my ($self, %params) = @_;
-  make_api_call($self, 'set-bandwidth-limits', undef, %params);
+  return shift->make_api_call('set-bandwidth-limits', undef, @_);
 }
 
 sub get_bandwidth_totals
 {
-  return make_api_call(shift, 'get-bandwidth-totals');
+  return shift->make_api_call('get-bandwidth-totals');
 }
 
 sub quit
 {
-  return make_api_call(shift, 'quit', \@_);
+  return shift->make_api_call('quit', \@_);
 }
 
 sub make_api_call
