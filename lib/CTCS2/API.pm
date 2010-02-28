@@ -42,7 +42,25 @@ $api->pause(@ids);
 
 =back
 
-=head1 API METHODS
+=head1 CLASS METHODS
+
+=over 4
+
+=item new([hostname = 'localhost' [, port=8080 ]])
+
+Creates a new API object.  The default host is 'localhost'; the default port
+is 8080.  These can be overridden by optional arguments: the host first, the
+port second:
+
+=over 4
+
+CTCS2::API->new();                  # 'localhost', port 8080
+CTCS2::API->new('some-host');       # 'some-host', port 8080
+CTCS2::API->new('some-host', 8000); # 'some-host', port 8000
+
+=back
+
+=head1 INSTANCE METHODS
 
 =over 4
 
