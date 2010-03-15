@@ -6,9 +6,11 @@ PREREQUISITES
 
 ctcs2 is written in Perl: you'll need a Perl interpreter on your system to run
 it.  It has been developed against Perl 5.8 on FreeBSD, Linux and Mac OS X and
-makes use of only standard modules.
+makes use of only standard modules
 
-There's nothing that stops it from working on Windows using Cygwin or
+The API module uses JSON::XS, but the API is not required to run CTCS2.
+
+There's nothing that stops CTCS2 from working on Windows using Cygwin or
 ActivePerl, but I haven't tested either except in the most superficial
 capacity.
 
@@ -37,6 +39,7 @@ with a simple, object oriented interface to a running CTCS2 server.  Run perldoc
 over the API.pm file for documentation.
 
 To use it, ensure that the folder containing the CTCS2 folder is in your PERL5LIB path,
-and simply 'use CTCS2::API;' from within your Perl script.
+and simply 'use CTCS2::API;' from within your Perl script.  You will need the JSON::XS
+module installed.
 
                                                            Danny
