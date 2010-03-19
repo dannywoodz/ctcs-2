@@ -269,7 +269,7 @@ sub apicall(&)
 
 setup_api(\%ctcs);
 
-ctcs_log(LOG_INFO, "CTCS Server started on port $port");
+ctcs_log(LOG_INFO, 'CTCS Server started on port %d', $port);
 
 ###############################################################################
 # Main loop
@@ -1972,7 +1972,78 @@ sub torrent_store_config
                                       type       => $type,
                                       range      => $range,
                                       value      => $value};
+    ###########################################################################
+    # Each configuration option has a validator function attached that allows
+    # new values to be easily checked before being set
+    ###########################################################################
+    $torrent->{config}->{$element}->{validator}  = attach_config_validator($torrent->{config}->{$element},
+									   $element,
+									   $torrent->{name});
   }
+}
+
+sub string_config_validator
+{
+  my ($element, $value, $element_name, $torrent_name) = @_;
+  ctcs_log( LOG_DEBUG, q(Validating string value '%s' for option '%s' of '%s'),
+	    $value, $element_name, $torrent_name );
+
+  return
+  defined($value)              &&
+  defined($element->{type})    &&
+  $element->{type} eq 'S'      &&
+  defined($element->{range})   &&
+  $element->{range} =~ /^\d+$/ &&
+  length($value) <= $element->{range};
+}
+
+sub integer_config_validator
+{
+  my ($element, $value, $element_name, $torrent_name) = @_;
+
+  return 0 unless defined($value) && $value =~ /^\d+$/;
+  return 0 unless defined($element->{type}) && $element->{type} eq 'I';
+
+  return ( $element->{range} =~ /^(\d+)-(\d+)$/ ) ?
+  $value >= $1 && $value <= $2 :
+  1;
+}
+
+sub float_config_validator
+{
+  my ($element, $value, $element_name, $torrent_name) = @_;
+
+  return 0 unless defined($value) && $value =~ /^\d+(?:\.\d+)?$/;
+  return 0 unless defined($element->{type}) && $element->{type} eq 'F';
+
+  return 1;
+}
+
+sub boolean_config_validator
+{
+  my ($element, $value, $element_name, $torrent_name) = @_;
+
+  return $value == 1 || $value == 0;
+}
+
+sub null_warning_validator
+{
+  my ($element, $value, $element_name, $torrent_name) = @_;
+  ctcs_log( LOG_WARNING, q(No validator for config option %s of %s), $element_name, $torrent_name );
+}
+
+sub attach_config_validator
+{
+  my ($element, $element_name, $torrent_name) = @_;
+  my $validator = ($element->{type} eq 'S') ? \&string_config_validator :
+  ($element->{type} eq 'I') ? \&integer_config_validator :
+  ($element->{type} eq 'F') ? \&float_config_validator :
+  ($element->{type} eq 'B') ? \&boolean_config_validator :
+  \&null_warning_validator;
+
+  return sub {
+    return $validator->($element, shift, $element_name, $torrent_name);
+  };
 }
 
 sub torrent_add_peer
@@ -2071,6 +2142,15 @@ sub torrent_resume
 sub torrent_set_config
 {
   my ($torrent, $config_option, $value) = @_;
+
+  ctcs_log( LOG_DEBUG, 'Setting config option %s of %s to %s', $config_option, $torrent->{name}, $value );
+
+  return unless
+  exists($torrent->{config}->{$config_option}->{validator})    &&
+  $torrent->{config}->{$config_option}->{validator}->($value);
+
+  ctcs_log( LOG_DEBUG, 'Config change validated.  Applying.' );
+
   my $client = get_client_by_id($torrent->{ctcs_id});
   if (!defined($client))
   {
@@ -2252,6 +2332,30 @@ sub setup_api
   $api->{'get-bandwidth-totals'} = apicall {
     my ($download_rate, $upload_rate) = total_used_bandwidth();
     return { 'download-rate' => $download_rate, 'upload-rate' => $upload_rate };
+  };
+
+  $api->{'set-config'} = apicall {
+    return { 'error' => 'set-config API call requires a single active torrent id' } if scalar @{$_[1]} != 1;
+    my $torrent     = $_[1]->[0]; # Only one torrent can have its config at the moment
+    # Config changes are not realised internally at once.  Instead, the the connected torrent
+    # is asked to supply its altered config as part of its communications with the server
+    # (besides, each config change simply adds to a write request queue for the connected
+    # torrent, so even the change itself won't be requested until later)
+    # In order to be able to respond to THIS request with an adjusted config, I take a
+    # copy of what the config is and pre-emptively apply the changes to the copy.
+    # This is technically lying.
+    my %config_copy = %{$torrent->{config}};
+    foreach my $key (keys %{$torrent->{config}})
+    {
+      if ( exists($_[0]->{$key}) && torrent_set_config( $torrent, $key, $_[0]->{$key} ) )
+      {
+	$config_copy{$key}->{value} = $_[0]->{$key};
+      }
+    }
+    return { 'action'  => 'set-config',
+	     'torrent' => $torrent->{name},
+	     'id'      => $torrent->{ctcs_id},
+	     'config'  => \%config_copy };
   };
 
   $api->{api} = apicall {

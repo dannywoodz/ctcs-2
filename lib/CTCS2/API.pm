@@ -265,6 +265,12 @@ sub quit
   return shift->make_api_call('quit', \@_);
 }
 
+sub set_config
+{
+  my ($self, $torrent_id, @params) = @_;
+  return $self->make_api_call('set-config', [$torrent_id], @params);
+}
+
 sub make_api_call
 {
   my ($self, $call, $torrent_ids, %params) = @_;
