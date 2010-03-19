@@ -263,8 +263,7 @@ sub apicall(&)
       @torrents = all_torrents();
     }
     my $response_data = $fun->($params, \@torrents, $socket, $explicit_parameters);
-    my $message = json_encode($response_data);
-    send_http_message($message, $socket);
+    return json_encode($response_data);
   };
 }
 
@@ -329,6 +328,7 @@ sub cleanup
 sub handle_read
 {
   my $socket = shift;
+  return unless defined $server;
   if ($socket == $server)       # New client connection
   {
     register_new_client($socket->accept());
@@ -530,10 +530,12 @@ sub writer_function
 {
   my $handler = shift;
   my $close_after_write = shift;
-  my $message = $handler->() || '';
+  my $message = $handler->();
   my $message_length = defined($message) ? length($message) : 0;
   my $message_offset = 0;
   return sub {
+    return 1 if !defined $message;
+
     my $client  = shift;
 
     ctcs_log(LOG_DEBUG, "Writing %d bytes of length %d, starting at %d",
@@ -874,8 +876,7 @@ sub handle_form_submission
   {
     my $params = $query->Vars;
     ctcs_log(LOG_INFO, "Processing API call '%s'", $1);
-    handle_api_call($1, $params, $client);
-    return "HTTP/1.1 200 OK\r\n\r\n";
+    return handle_api_call($1, $params, $client);
   }
 
   return error_page($target);
