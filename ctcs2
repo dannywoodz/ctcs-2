@@ -885,15 +885,15 @@ sub handle_form_submission
 sub handle_api_call
 {
   my ($path, $params, $client) = @_;
-  my $handler = $ctcs{api}->{$path} || sub { unknown_api_call($path, $client); };
-  $handler->($params, $client);
+  my $handler = $ctcs{api}->{$path} || sub { return unknown_api_call($path, $client); };
+  return $handler->($params, $client);
 }
 
 sub unknown_api_call
 {
   my ($path, $client) = @_;
   ctcs_log(LOG_WARNING, "Unknown API call: '%s'", $path);
-  send_http_message(json_encode({ 'error' => "Unknown API call '$path'"}), $client);
+  return json_encode({ 'error' => "Unknown API call '$path'"});
 }
 
 sub page_content
@@ -1688,21 +1688,6 @@ sub prepare_http_message
 }
 
 ###############################################################################
-# Sends a message preceded by appropriate HTTP headers.  An optional third
-# argument can be a hash with specific HTTP headers to set.  Unless overridden,
-# the default content type is text/plain.  Do NOT specify a 'Content-Length':
-# it will be generated automatically.  The Content Type should be overridden
-# with the 'Content-Type' key.
-###############################################################################
-
-sub send_http_message
-{
-  my ($message, $client, %headers) = @_;
-  my $http_message = prepare_http_message($message, %headers);
-  send_message( $http_message, $client);
-}
-
-###############################################################################
 # Adds the given writer function to the message queue of the given client.
 # As with send_message, the send doesn't happen immediately.
 ###############################################################################
@@ -2283,8 +2268,7 @@ sub setup_api
   };
 
   $api->{exit}    = apicall {
-    # Can't just use send_http_message, as it wouldn't be actioned until the
-    # next write cycle (which isn't going to happen as we're about to exit)
+    # Need to write out the response immediately, as we're about to quit.
     print { $_[2] } prepare_http_message(json_encode({'action' => 'CTCS exiting'}));
     exit(0);
   };
