@@ -60,6 +60,8 @@ CTCS2::API->new('some-host', 8000); # 'some-host', port 8000
 
 =back
 
+=back
+
 =head1 INSTANCE METHODS
 
 =over 4
@@ -139,6 +141,27 @@ $api->set_bandwidth_limits( 'download-limit' => 0 );
 Reports the currently used upload/download bandwidths.  The hashref returned
 has the keys 'upload-rate' and 'download-rate', with values measured in
 bytes/second.
+
+=item get_config
+
+Reports the configurations for all registered torrents.  If given one or
+more torrent ids, restricts the report to the specified torrents.  The
+hashref returned has the keys 'action' and 'configs'.  The value associated
+with 'action' is 'get-config', and the one associated with 'configs' is a
+list of configurations, one per torrent.  Each configuration is a hashref,
+with the keys 'torrent', 'id' and 'config'.
+
+=item set_config
+
+Requires a single torrent id, and sets the configuration parameters in
+the supplied hash on that torrent.  Keys should be the ctorrent configuration
+parameters.
+
+$api->set_config('ctcs-torrent-4',
+                 'seed_ratio' => 1.5,
+                 'ctcs_server' => 'new-host:8002');
+
+Returns the same as 'get-config' when done.
 
 =item quit
 
