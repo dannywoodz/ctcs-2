@@ -2358,6 +2358,17 @@ sub setup_api
 	     'config'  => \%config_copy };
   };
 
+  $api->{'get-config'} = apicall {
+    my @configs;
+    foreach my $torrent(@{$_[1]})
+    {
+      push(@configs, { 'torrent' => $torrent->{name},
+		       'id'      => $torrent->{ctcs_id},
+		       'config'  => $torrent->{config} });
+    }
+    return { 'action' => 'get-config', 'configs' => \@configs };
+  };
+
   $api->{api} = apicall {
     my @apifuns = keys %{$api};
     return { 'api' => \@apifuns };

@@ -271,6 +271,11 @@ sub set_config
   return $self->make_api_call('set-config', [$torrent_id], @params);
 }
 
+sub get_config
+{
+  return shift->make_api_call('get-config', \@_);
+}
+
 sub make_api_call
 {
   my ($self, $call, $torrent_ids, %params) = @_;
