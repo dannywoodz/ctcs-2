@@ -197,10 +197,9 @@ my $server = IO::Socket::INET->new(LocalPort => $port,
                                    Proto     => 'tcp',
                                    Listen    => SOMAXCONN) || die $!;
 
-my $readers  = IO::Select->new();
+my $readers  = IO::Select->new($server);
 my $writers  = IO::Select->new();
-
-$readers->add($server);
+my $errors   = IO::Select->new();
 
 ###############################################################################
 # Setup defaults for the server
@@ -277,8 +276,9 @@ ctcs_log(LOG_INFO, 'CTCS Server started on port %d', $port);
 
 for (my $last_update = time(); defined($server); )
 {
-  my ($readable, $writable) = IO::Select::select($readers, $writers, undef, 1);
+  my ($readable, $writable, $errored) = IO::Select::select($readers, $writers, $errors, 1);
 
+  handle_error($_) for @$errored;
   handle_write($_) for @$writable;
   handle_read($_)  for @$readable;
 
@@ -316,6 +316,15 @@ sub cleanup
     $server->close();
     undef $server;
   }
+}
+
+###############################################################################
+# There's nothing special required for errored clients: just get rid of them
+###############################################################################
+
+sub handle_error
+{
+  deregister_client(shift);
 }
 
 ###############################################################################
@@ -372,6 +381,9 @@ sub register_new_client
 sub deregister_client
 {
   my $client   = shift;
+
+  return if !exists($clients{$client});
+
   my $hostname = $client->opened() ? address_of($client) : "CLOSED";
   my $port     = $client->opened() ? $client->peerport() : -1;
   if (exists($clients{$client}) &&
@@ -389,6 +401,9 @@ sub deregister_client
            (defined($hostname)) ? " from $hostname:$port" : "");
   $readers->remove($client) while $readers->exists($client);
   $writers->remove($client) while $writers->exists($client);
+
+  return unless $client->opened();
+
   $client->close();
   $ctcs{closed_connections}++;
 }
