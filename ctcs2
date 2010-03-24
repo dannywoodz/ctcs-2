@@ -2327,7 +2327,7 @@ sub setup_api
       ctcs_log( LOG_INFO, 'Setting upload limit to %d', $upload_limit);
     }
     autobalance_bandwidth();
-    return $api->{'get-bandwidth-limits'}->($_[0], $_[2]);
+    return { 'upload-limit' => $ctcs{upload_limit}, 'download-limit' => $ctcs{download_limit} };
   };
 
   $api->{'get-bandwidth-totals'} = apicall {
