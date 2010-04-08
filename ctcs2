@@ -1986,6 +1986,11 @@ sub torrent_store_config
     {
       $long_description = substr($config_line, pos($config_line), $length);
     }
+    if ( exists($torrent->{config}->{$element}) &&
+	 exists($torrent->{config}->{$element}->{validator}) )
+    {
+      delete $torrent->{config}->{$element}->{validator};
+    }
     $torrent->{config}->{$element} = {short_desc => ($short_description || ''),
                                       long_desc  => ($long_description || ''),
                                       type       => $type,
