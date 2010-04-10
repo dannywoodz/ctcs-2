@@ -1913,21 +1913,21 @@ sub torrent_set_status
   my ($torrent_info, $status_line) = @_;
 
   # Apologies for the horrendous pattern match.
-  $1 =~ m!^
-          (\d+):(\d+)/       # Active seeds, and total seeders
-          (\d+):(\d+)/       # Active leechers, and total leechers
-          (\d+)              # Total connections
-          \s+
-          (\d+)/(\d+)/(\d+)  # Chunks downloaded, total, and available
-          \s+
-          (\d+),(\d+)        # Download/upload rates
-          \s+
-          (\d+),(\d+)        # Total downloaded/uploaded
-          \s+
-          (\d+),(\d+)        # Download/upload limits
-          \s+
-          (\d+)              # Cache used
-         !x;
+  $status_line =~ m!^
+		    (\d+):(\d+)/       # Active seeds, and total seeders
+		    (\d+):(\d+)/       # Active leechers, and total leechers
+		    (\d+)              # Total connections
+		    \s+
+		    (\d+)/(\d+)/(\d+)  # Chunks downloaded, total, and available
+		    \s+
+		    (\d+),(\d+)        # Download/upload rates
+		    \s+
+		    (\d+),(\d+)        # Total downloaded/uploaded
+		    \s+
+		    (\d+),(\d+)        # Download/upload limits
+		    \s+
+		    (\d+)              # Cache used
+		   !x;
 
   $torrent_info->{active_seeders}     = $1;
   $torrent_info->{total_seeders}      = $2;
