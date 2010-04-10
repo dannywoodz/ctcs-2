@@ -75,11 +75,13 @@ use Data::Dumper;
 use strict;
 use warnings;
 use diagnostics;
-use constant LOG_TEMP      => 0;
+use constant LOG_ALWAYS    => 0;
 use constant LOG_DEBUG     => 1;
 use constant LOG_INFO      => 2;
 use constant LOG_WARNING   => 3;
 use constant LOG_ERROR     => 4;
+use constant LOG_MIN       => 1;
+use constant LOG_MAX       => 4;
 use constant SUMMARY_BRIEF => 1;
 use constant SUMMARY_FULL  => 2;
 use constant FORM_ENCODING => 'application/x-www-form-urlencoded';
@@ -214,6 +216,13 @@ $ctcs{log_timestamps}       = !$suppress_log_timestamps;
 $ctcs{log_level}            = LOG_INFO;
 $ctcs{log_file_handle}      = \*STDOUT;
 $ctcs{auto_refresh}         = 1;
+
+$SIG{USR1} = sub {
+  ctcs_log(LOG_ALWAYS, 'Logging level set to %d', ++$ctcs{log_level}) if $ctcs{log_level} < LOG_MAX;
+};
+$SIG{USR2} = sub {
+  ctcs_log(LOG_ALWAYS, 'Logging level set to %d', --$ctcs{log_level}) if $ctcs{log_level} > LOG_MIN;
+};
 
 ###############################################################################
 # Setup the API.
@@ -390,7 +399,7 @@ sub deregister_client
       exists($clients{$client}->{messages}) &&
       scalar @{$clients{$client}->{messages}} > 0)
   {
-    ctcs_log(LOG_WARNING, "CLIENT BEING DELETED WITH A NON-EMPTY MESSAGE QUEUE");
+    ctcs_log(LOG_WARNING, "Client being deleted with a non-empty message queue");
     my $string = IO::String->new();
     $_->($string) for @{$clients{$client}->{messages}};
     ctcs_log(LOG_WARNING, ${$string->string_ref()});
@@ -1590,7 +1599,7 @@ sub line_reader_function
 
 sub ctcs_log
 {
-  return if $_[0] < $ctcs{log_level} && $_[0] != LOG_TEMP;
+  return if $_[0] < $ctcs{log_level} && $_[0] != LOG_ALWAYS;
   my ($level, $format) = (shift, shift);
   my $log = $ctcs{log_file_handle} || \*STDOUT;
   if ($ctcs{log_timestamps})
@@ -2024,6 +2033,8 @@ sub string_config_validator
 sub integer_config_validator
 {
   my ($element, $value, $element_name, $torrent_name) = @_;
+  ctcs_log( LOG_DEBUG, q(Validating integer value '%s' for option '%s' of '%s'),
+	    $value, $element_name, $torrent_name );
 
   return 0 unless defined($value) && $value =~ /^\d+$/;
   return 0 unless defined($element->{type}) && $element->{type} eq 'I';
@@ -2036,6 +2047,8 @@ sub integer_config_validator
 sub float_config_validator
 {
   my ($element, $value, $element_name, $torrent_name) = @_;
+  ctcs_log( LOG_DEBUG, q(Validating float value '%s' for option '%s' of '%s'),
+	    $value, $element_name, $torrent_name );
 
   return 0 unless defined($value) && $value =~ /^\d+(?:\.\d+)?$/;
   return 0 unless defined($element->{type}) && $element->{type} eq 'F';
@@ -2046,6 +2059,8 @@ sub float_config_validator
 sub boolean_config_validator
 {
   my ($element, $value, $element_name, $torrent_name) = @_;
+  ctcs_log( LOG_DEBUG, q(Validating boolean value '%s' for option '%s' of '%s'),
+	    $value, $element_name, $torrent_name );
 
   return $value == 1 || $value == 0;
 }
@@ -2053,7 +2068,7 @@ sub boolean_config_validator
 sub null_warning_validator
 {
   my ($element, $value, $element_name, $torrent_name) = @_;
-  ctcs_log( LOG_WARNING, q(No validator for config option %s of %s), $element_name, $torrent_name );
+  ctcs_log( LOG_WARNING, q(No validator for config option '%s' of '%s'), $element_name, $torrent_name );
 }
 
 sub attach_config_validator
