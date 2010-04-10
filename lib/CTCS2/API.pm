@@ -299,6 +299,16 @@ sub get_config
   return shift->make_api_call('get-config', \@_);
 }
 
+sub get_log_level
+{
+  return shift->make_api_call('get-log-level');
+}
+
+sub set_log_level
+{
+  return shift->make_api_call('set-log-level', undef, 'log-level' => shift);
+}
+
 sub make_api_call
 {
   my ($self, $call, $torrent_ids, %params) = @_;
