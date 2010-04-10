@@ -415,7 +415,8 @@ sub deregister_client
   # element being deleted.
   #############################################################################
 
-  if (exists($clients{$client}->{torrent}) && exists($clients{$client}->{torrent}->{config}))
+  if (exists($clients{$client}->{torrent}) &&
+      exists($clients{$client}->{torrent}->{config}))
   {
     my $config = $clients{$client}->{torrent}->{config};
     ($config->{$_}->{validator} = undef) for keys %$config;
@@ -1995,23 +1996,15 @@ sub torrent_store_config
     {
       $long_description = substr($config_line, pos($config_line), $length);
     }
-    if ( exists($torrent->{config}->{$element}) &&
-	 exists($torrent->{config}->{$element}->{validator}) )
-    {
-      delete $torrent->{config}->{$element}->{validator};
-    }
-    $torrent->{config}->{$element} = {short_desc => ($short_description || ''),
-                                      long_desc  => ($long_description || ''),
-                                      type       => $type,
-                                      range      => $range,
-                                      value      => $value};
-    ###########################################################################
-    # Each configuration option has a validator function attached that allows
-    # new values to be easily checked before being set
-    ###########################################################################
-    $torrent->{config}->{$element}->{validator}  = attach_config_validator($torrent->{config}->{$element},
-									   $element,
-									   $torrent->{name});
+
+    my $config = ($torrent->{config}->{$element} ||= {});
+
+    $config->{short_desc}  = $short_description || '';
+    $config->{long_desc}   = $long_description  || '';
+    $config->{type}        = $type;
+    $config->{range}       = $range;
+    $config->{value}       = $value;
+    $config->{validator} ||= attach_config_validator($config, $element, $torrent->{name});
   }
 }
 
