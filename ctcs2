@@ -221,53 +221,6 @@ $ctcs{auto_refresh}         = 1;
 # Setup the API.
 ###############################################################################
 
-###############################################################################
-# apicall is a bit of a tongue-twister.  It should be given a block to execute
-# when it is triggered.  This block will be fed four parameters in @_ when it
-# is called:
-#
-# - the HTTP params associated with the request that triggered the call
-# - a list reference of torrents (elements of the %clients hash)
-# - the client socket that triggered the request, in case an answer is required
-# - a flag indicating whether the torrents list being fed into the block
-#   was formed explicitly (from the HTTP parameters) or implicitly (taking all
-#   registered torrents in the absence of specific instructions).
-#
-# The function returned by apicall expects to be called with two paramters:
-#
-# - the HTTP parameters for the actual request triggering the call
-# - the client socket that initiated the call.
-#
-###############################################################################
-
-sub apicall(&)
-{
-  my $fun = shift;
-  return sub {
-    my $params = shift;
-    my $socket = shift;
-    my @torrents;
-    my $explicit_parameters = 0;
-    if ( exists($params->{torrents}) )
-    {
-      ctcs_log( LOG_DEBUG, 'API call taking torrent IDs from explicit parameters \'%s\'', $params->{torrents} );
-      foreach my $id (split(/,/, $params->{torrents}))
-      {
-	my $torrent = get_torrent_by_id($id);
-	push(@torrents, $torrent) if $torrent;
-      }
-      $explicit_parameters = 1;
-    }
-    else
-    {
-      ctcs_log( LOG_DEBUG, 'API call using all torrent clients' );
-      @torrents = all_torrents();
-    }
-    my $response_data = $fun->($params, \@torrents, $socket, $explicit_parameters);
-    return json_encode($response_data);
-  };
-}
-
 setup_api(\%ctcs);
 
 ctcs_log(LOG_INFO, 'CTCS Server started on port %d', $port);
@@ -2270,6 +2223,53 @@ sub torrent_summary
   }
 
   return $data;
+}
+
+###############################################################################
+# apicall is a bit of a tongue-twister.  It should be given a block to execute
+# when it is triggered.  This block will be fed four parameters in @_ when it
+# is called:
+#
+# - the HTTP params associated with the request that triggered the call
+# - a list reference of torrents (elements of the %clients hash)
+# - the client socket that triggered the request, in case an answer is required
+# - a flag indicating whether the torrents list being fed into the block
+#   was formed explicitly (from the HTTP parameters) or implicitly (taking all
+#   registered torrents in the absence of specific instructions).
+#
+# The function returned by apicall expects to be called with two paramters:
+#
+# - the HTTP parameters for the actual request triggering the call
+# - the client socket that initiated the call.
+#
+###############################################################################
+
+sub apicall(&)
+{
+  my $fun = shift;
+  return sub {
+    my $params = shift;
+    my $socket = shift;
+    my @torrents;
+    my $explicit_parameters = 0;
+    if ( exists($params->{torrents}) )
+    {
+      ctcs_log( LOG_DEBUG, 'API call taking torrent IDs from explicit parameters \'%s\'', $params->{torrents} );
+      foreach my $id (split(/,/, $params->{torrents}))
+      {
+	my $torrent = get_torrent_by_id($id);
+	push(@torrents, $torrent) if $torrent;
+      }
+      $explicit_parameters = 1;
+    }
+    else
+    {
+      ctcs_log( LOG_DEBUG, 'API call using all torrent clients' );
+      @torrents = all_torrents();
+    }
+    my $response_data = $fun->($params, \@torrents, $socket, $explicit_parameters);
+    return json_encode($response_data);
+  };
 }
 
 sub setup_api
