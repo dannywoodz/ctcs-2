@@ -71,7 +71,6 @@ use Errno 'EAGAIN';
 use CGI qw(:standard);
 use Getopt::Long;
 use POSIX qw(strftime);
-use Data::Dumper;
 use strict;
 use warnings;
 use diagnostics;
@@ -988,6 +987,85 @@ sub json_encode_to_stream
   return $stream;
 }
 
+sub pretty_print_json_string
+{
+  my $json_string      = shift;
+  my $spaces           = shift || 4;
+  my $stream           = IO::String->new($json_string);
+  my $in_string        = 0;
+  my $escape_next_char = 0;
+  my @offsets          = (0);
+
+  until ( $stream->eof() )
+  {
+    my $char;
+    read($stream, $char, 1);
+
+    if ( $in_string && $char eq '\\' )
+    {
+      $escape_next_char = 1;
+      next;
+    }
+
+    if ( $escape_next_char )
+    {
+      print '\\', $char;
+      $escape_next_char = 0;
+      next;
+    }
+
+    if ( $char eq '"' )
+    {
+      $in_string = !$in_string;
+      print $char;
+      next;
+    }
+
+    if ( !$in_string )
+    {
+      if ( $char eq '{' || $char eq '[' )
+      {
+        print $char, "\n";
+        push(@offsets, $offsets[$#offsets] + $spaces);
+        print ' ' x $offsets[$#offsets];
+        next;
+      }
+
+      if ( $char eq '}' || $char eq ']' )
+      {
+        print "\n";
+        pop(@offsets);
+        print ' ' x $offsets[$#offsets];
+        print $char;
+        next;
+      }
+
+      if ( $char eq "\n" )
+      {
+        print $char;
+        print ' ' x $offsets[$#offsets];
+        next;
+      }
+
+      if ( $char eq "," )
+      {
+        print $char, "\n";
+        print ' ' x $offsets[$#offsets];
+        next;
+      }
+
+      if ( $char eq ':' )
+      {
+        print ' : ';
+        next;
+      }
+    }
+
+    print $char;
+  }
+
+  print "\n";
+}
 
 ###############################################################################
 # Given a number of seconds, returns a string of format: H:MM:SS
@@ -1371,10 +1449,7 @@ sub handle_dump
 {
   return with_output_to_string {
     print "CTCS\n\n";
-    while (my ($key, $value) = each %ctcs)
-    {
-      printf "%s: %s\n", $key, $value;
-    }
+    pretty_print_json_string(json_encode(\%ctcs));
     print "\nREADERS\n\n";
     map { printf "%s: %s:%d (%s)\n",
           $_,
@@ -1389,8 +1464,8 @@ sub handle_dump
           $_ == $server ? $ctcs{port} : $_->peerport(),
           $_ == $server ? "SERVER" : exists($clients{$_}->{torrent}) ? "TORRENT: " . $clients{$_}->{torrent}->{name} : "WEB"
         } $writers->handles;
-    print "\nMESSAGES\n\n";
-    print Dumper(\%clients);
+    print "\nCLIENTS\n\n";
+    pretty_print_json_string(json_encode(\%clients));
   };
 }
 
