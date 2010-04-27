@@ -709,34 +709,10 @@ sub handle_send_page
 {
   my ($location, $client) = @_;
   my $response_code;
-  my $page;
-  my $plain = 0;
-  my $page_content = page_content($location, \$plain);
+  my $page = page_content($location);
 
-  #############################################################################
-  # A request that sets $$plain to a true value is most likely a handler for
-  # an AJAX request.  This flag indicates that the content should *not* be
-  # wrapped up in an HTML head, body, etc, but should just go out as-is with
-  # an HTTP header slapped on top.
-  #############################################################################
-
-  if ($page_content)
+  if ( defined($page) )
   {
-    $page = with_output_to_string {
-      if ($plain)
-      {
-        print $page_content;
-      }
-      else
-      {
-        print start_html(-title => 'CTCS 2',
-                         -script => javascript(),
-                         -head => style({type => 'text/css'},
-                                        stylesheet())),
-                                        $page_content,
-                                        end_html();
-      }
-    };
     $response_code = '200 OK';
   }
   else
@@ -884,20 +860,57 @@ sub unknown_api_call
   return json_encode({ 'error' => "Unknown API call '$path'"});
 }
 
+###############################################################################
+# Wraps a given chunk of text in the body of an HTML page.  If given a CODE
+# ref, that ref is invoked with any additional parameters given to it.
+# If the last parameter is a HASH ref, it can configure optional elements of
+# the page.
+#
+# Examples:
+#
+#   html_page('<h2>Boo</h2>');
+#   - yields a page with the default stylesheet and JavaScript.
+#   html_page('<h2>Boo</h2>', { noscript => 1, nostyle => 1 });
+#   - yields a page with NO stylesheet or JavaScript
+#   html_page(sub { return '<h2>Boo</h2>' }, { noscript => 1, nostyle => 1 });
+#   - as above, but using an anonymous sub to generate the content.
+#
+# Valid config parameters are currently:
+#   - noscript - if true, no JavaScript is added to the page.  Default is false
+#   - nostyle  - if true, no stylesheet is added to the page.  Default is false
+#   - script   - JavaScript code to use *instead* of the default
+#   - style    - CSS to use *instead* of the default.
+# noscript and nostyle trump script and style, respectively.
+#
+###############################################################################
+
+sub html_page
+{
+  my $content = shift;
+  my $config  = ref($_[$#_]) eq 'HASH' ? pop(@_) : {};
+  my $script  = $config->{noscript} ? '' : $config->{script} || javascript();
+  my $style   = $config->{nostyle} ? '' : $config->{style} || stylesheet();
+
+  $content = $content->(@_) if ref($content) eq 'CODE';
+
+  return join('',
+	      start_html(-title => 'CTCS 2',
+			 -script => $script,
+			 -head => style({type => 'text/css'}, $style)),
+	      $content,
+	      end_html());
+}
+
 sub page_content
 {
-  my ($page, $plain_ref) = @_;
+  my $page = shift;
 
-  if ($page eq '/current-status')
-  {
-    $$plain_ref = 1;
-    return json_status();
-  }
+  return json_status() if ($page eq '/current-status');
+  return html_page(\&index_page) if $page eq "/";
+  return html_page(\&torrent_info_page, $1) if $page =~ /^\/?torrent\/(.+)$/;
+  return html_page(\&advanced_limits_page) if $page eq '/advanced-limits';
+  return html_page(\&debug_page, { nostyle => 1, noscript => 1 }) if $page eq "/debug";
 
-  return index_page() if $page eq "/";
-  return torrent_info_page($1) if $page =~ /^\/?torrent\/(.+)$/;
-  return advanced_limits_page() if $page eq '/advanced-limits';
-  return debug_page() if $page eq "/debug";
   return undef;
 }
 
