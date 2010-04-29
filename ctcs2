@@ -88,7 +88,7 @@ use constant FORM_ENCODING => 'application/x-www-form-urlencoded';
 $SIG{INT}  = \&cleanup;
 $SIG{TERM} = \&cleanup;
 $SIG{PIPE} = 'IGNORE';
-$|         = 1;                 # Autoflush STDOUT
+STDOUT->autoflush(1);
 $0         = 'ctcs2';
 
 my $port                    = 8080;
@@ -907,8 +907,8 @@ sub page_content
 
   return json_status() if ($page eq '/current-status');
   return html_page(\&index_page) if $page eq "/";
-  return html_page(\&torrent_info_page, $1) if $page =~ /^\/?torrent\/(.+)$/;
-  return html_page(\&advanced_limits_page) if $page eq '/advanced-limits';
+  return html_page(\&torrent_info_page, $1, { noscript => 1}) if $page =~ /^\/?torrent\/(.+)$/;
+  return html_page(\&advanced_limits_page, { noscript => 1}) if $page eq '/advanced-limits';
   return html_page(\&debug_page, { nostyle => 1, noscript => 1 }) if $page eq "/debug";
 
   return undef;
