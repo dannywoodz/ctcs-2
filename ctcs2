@@ -993,7 +993,9 @@ sub json_encode_to_stream
     }
     else
     {
-      printf $stream '"%s"', $entity;
+      my $string = $entity . '';
+      $string =~ s/"/\\"/g;
+      printf $stream '"%s"', $string;
     }
   }
 
