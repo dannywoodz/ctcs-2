@@ -66,6 +66,7 @@ BSD
 use IO::Socket qw($CRLF AF_INET SOMAXCONN SOCK_STREAM);
 use IO::Select;
 use IO::String;
+use IO::Scalar;
 use Socket 'TCP_NODELAY';
 use Errno 'EAGAIN';
 use CGI qw(:standard);
@@ -1002,11 +1003,11 @@ sub json_encode_to_stream
   return $stream;
 }
 
-sub pretty_print_json_string
+sub pretty_print_json_string_ref
 {
-  my $json_string      = shift;
+  my $json_string_ref  = shift;
   my $spaces           = shift || 4;
-  my $stream           = IO::String->new($json_string);
+  my $stream           = IO::Scalar->new($json_string_ref);
   my $in_string        = 0;
   my $escape_next_char = 0;
   my @offsets          = (0);
@@ -1462,9 +1463,11 @@ sub error_page
 
 sub handle_dump
 {
+  my $json;
   return with_output_to_string {
     print "CTCS\n\n";
-    pretty_print_json_string(json_encode(\%ctcs));
+    $json = json_encode(\%ctcs);
+    pretty_print_json_string_ref(\$json);
     print "\nREADERS\n\n";
     map { printf "%s: %s:%d (%s)\n",
           $_,
@@ -1480,7 +1483,8 @@ sub handle_dump
           $_ == $server ? "SERVER" : exists($clients{$_}->{torrent}) ? "TORRENT: " . $clients{$_}->{torrent}->{name} : "WEB"
         } $writers->handles;
     print "\nCLIENTS\n\n";
-    pretty_print_json_string(json_encode(\%clients));
+    $json = json_encode(\%clients);
+    pretty_print_json_string_ref(\$json);
   };
 }
 
