@@ -973,7 +973,7 @@ sub json_encode_to_stream
   {
     print $stream '[';
     json_encode_to_stream($_, $stream) && print $stream ',' for @$entity;
-    seek($stream, SEEK_CUR, -1) unless scalar @$entity == 0;
+    seek($stream, -1, SEEK_CUR) unless scalar @$entity == 0;
     print $stream ']';
   }
   elsif ( $type eq 'HASH' )
@@ -986,7 +986,7 @@ sub json_encode_to_stream
       json_encode_to_stream($value, $stream);
       print $stream ',';
     }
-    seek($stream, SEEK_CUR, -1);
+    seek($stream, -1, SEEK_CUR);
     print $stream '}';
   }
   else
