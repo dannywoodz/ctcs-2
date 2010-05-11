@@ -72,6 +72,7 @@ use Errno 'EAGAIN';
 use CGI qw(:standard);
 use Getopt::Long;
 use POSIX qw(strftime);
+use Fcntl qw(SEEK_CUR);
 use strict;
 use warnings;
 use diagnostics;
@@ -690,15 +691,16 @@ sub function_to_handle_request
 sub with_output_to_string(&)
 {
   my $function = shift;
-  my $string = IO::String->new();
-  my $oldfd = select $string;
+  my $string = '';
+  my $handle;
+  open($handle, '>', \$string) || die $!;
+  my $oldfd = select $handle;
   my $oldflush = $|;
-  $| = 1;
   eval { $function->() };
-  $| = $oldflush;
+  close($handle);
   select $oldfd;
   warn if $@;
-  return ${$string->string_ref()};
+  return $string;
 }
 
 ###############################################################################
@@ -953,7 +955,12 @@ sub json_status_of_single_torrent
 
 sub json_encode
 {
-  return ${json_encode_to_stream(shift, IO::String->new())->string_ref()};
+  my ($content, $handle) = ('');
+  open($handle, '>', \$content) || die $!;
+  eval { json_encode_to_stream(shift, $handle) };
+  close($handle);
+  die $@ if $@;
+  return $content;
 }
 
 sub json_encode_to_stream
@@ -966,7 +973,7 @@ sub json_encode_to_stream
   {
     print $stream '[';
     json_encode_to_stream($_, $stream) && print $stream ',' for @$entity;
-    $stream->pos($stream->pos() - 1) unless scalar @$entity == 0;
+    seek($stream, SEEK_CUR, -1) unless scalar @$entity == 0;
     print $stream ']';
   }
   elsif ( $type eq 'HASH' )
@@ -979,7 +986,7 @@ sub json_encode_to_stream
       json_encode_to_stream($value, $stream);
       print $stream ',';
     }
-    $stream->pos($stream->pos() - 1);
+    seek($stream, SEEK_CUR, -1);
     print $stream '}';
   }
   else
@@ -1007,15 +1014,15 @@ sub pretty_print_json_string_ref
 {
   my $json_string_ref  = shift;
   my $spaces           = shift || 4;
-  my $stream           = IO::Scalar->new($json_string_ref);
+  my $stream           = undef;
   my $in_string        = 0;
   my $escape_next_char = 0;
   my @offsets          = (0);
 
-  until ( $stream->eof() )
+  open ($stream, '<', $json_string_ref ) || die $!;
+
+  while(defined(my $char = getc($stream)))
   {
-    my $char;
-    read($stream, $char, 1);
 
     if ( $in_string && $char eq '\\' )
     {
