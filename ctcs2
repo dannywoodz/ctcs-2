@@ -65,14 +65,13 @@ BSD
 
 use IO::Socket qw($CRLF AF_INET SOMAXCONN SOCK_STREAM);
 use IO::Select;
-use IO::String;
-use IO::Scalar;
+use IO::Handle;
 use Socket 'TCP_NODELAY';
 use Errno 'EAGAIN';
 use CGI qw(:standard);
 use Getopt::Long;
 use POSIX qw(strftime);
-use Fcntl qw(SEEK_CUR);
+use Fcntl qw(SEEK_CUR SEEK_SET);
 use strict;
 use warnings;
 use diagnostics;
@@ -347,9 +346,14 @@ sub deregister_client
       scalar @{$clients{$client}->{messages}} > 0)
   {
     ctcs_log(LOG_WARNING, "Client being deleted with a non-empty message queue");
-    my $string = IO::String->new();
-    $_->($string) for @{$clients{$client}->{messages}};
-    ctcs_log(LOG_WARNING, ${$string->string_ref()});
+    my $string = '';
+    my $handle = IO::Handle->new();
+    if (open($handle, '>', \$string))
+    {
+      $_->($handle) for @{$clients{$client}->{messages}};
+      close($handle);
+    }
+    ctcs_log(LOG_WARNING, $string);
   }
 
   #############################################################################
@@ -443,16 +447,19 @@ sub reader_function_for
   my $function = $clients{$socket}->{reader};
   if (!$function)
   {
-    my $header = IO::String->new();
+    my $header = IO::Handle->new();
+    my $header_string = '';
     my $header_read;
     my $content_length;
     my $body;
     my $line_reader = line_reader_function();
     my $do_initialise = 1;
 
+    open($header, '>', \$header_string) || die $!;
+
     my $initialise = sub {
       ctcs_log(LOG_DEBUG, "Initialising reader function");
-      $header->pos(0);
+      seek($header, 0, SEEK_SET);
       $header_read    = 0;
       $content_length = 0;
       $body = '';
@@ -467,7 +474,7 @@ sub reader_function_for
 
       while (!$header_read && defined($line = $line_reader->($client)))
       {
-        return $line if $line !~ /^(?:POST|GET)/ && $header->pos() == 0;
+        return $line if $line !~ /^(?:POST|GET)/ && tell($header) == 0;
         $content_length = $1 if $line =~ /^Content-Length: (\d+)/;
         ctcs_log(LOG_DEBUG, "Header line: '%s'", $line);
         print $header $line, "\n";
@@ -497,7 +504,7 @@ sub reader_function_for
 
       $do_initialise = 1;
 
-      return ${$header->string_ref()};
+      return $header_string;
     }
   }
   return $function;
@@ -737,7 +744,9 @@ sub handle_send_page
 sub handle_form_submission
 {
   my ($target, $client, $request) = @_;
-  my $query = CGI->new(IO::String->new($request));
+  my $handle = IO::Handle->new();
+  open($handle, '<', \$request) || die $!;
+  my $query = CGI->new($handle);
 
   ctcs_log(LOG_DEBUG, $request);
 
@@ -1765,7 +1774,9 @@ sub send_message
 sub prepare_http_message
 {
   my ($message, %headers) = @_;
-  my $http_message = IO::String->new();
+  my $handle = IO::Handle->new();
+  my $http_message = '';
+  open($handle, '>', \$handle) || die $!;
 
   $headers{'Content-Type'} ||= 'text/plain';
 
@@ -1774,7 +1785,7 @@ sub prepare_http_message
   print $http_message 'Content-Length: ', length($message), $CRLF, $CRLF;
   print $http_message $message;
 
-  return ${$http_message->string_ref()};
+  return $http_message;
 }
 
 ###############################################################################
@@ -2287,7 +2298,7 @@ sub address_of
   my $client = shift;
   unless (exists $clients{$client}->{address})
   {
-    $clients{$client}->{address} = $client->opened() ? 
+    $clients{$client}->{address} = $client->opened() ?
       (gethostbyaddr($client->peeraddr(), AF_INET))[0] :
       "CLOSED";
   }
