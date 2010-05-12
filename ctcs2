@@ -702,7 +702,6 @@ sub with_output_to_string(&)
   my $handle;
   open($handle, '>', \$string) || die $!;
   my $oldfd = select $handle;
-  my $oldflush = $|;
   eval { $function->() };
   close($handle);
   select $oldfd;
