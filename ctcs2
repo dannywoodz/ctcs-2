@@ -1604,7 +1604,7 @@ sub line_reader_function
     my $external_read_size =
     (defined($bytes_requested) && $bytes_requested >= $buffer_length) ?
     $bytes_requested - $buffer_length :
-    ($buffer               =~ /\n/) ? 0 :
+    ($buffer               =~ tr/\n/\n/d) ? 0 :
     1024;
 
     ###########################################################################
@@ -1613,7 +1613,6 @@ sub line_reader_function
 
     if ($external_read_size > 0)
     {
-      return undef if not $client->opened();
       my $result = sysread($client, $buffer, $external_read_size, $buffer_length);
       return undef if !defined($result) || $result == 0;
       $buffer_length += $result;
@@ -1645,7 +1644,12 @@ sub line_reader_function
     # at the end of the line
     ###########################################################################
 
-    $line =~ s/(^|\S)\s*$/$1/ unless defined($bytes_requested);
+    unless (defined($bytes_requested))
+    {
+      local $/ = $CRLF;
+      chomp($line);
+    }
+
     return $line;
   };
 }
