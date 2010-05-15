@@ -1161,6 +1161,8 @@ sub index_page
 
     printf '<form method="post" action="/" enctype="%s">', FORM_ENCODING;
     print div({id => 'global-bandwidth-limits'},
+              div({style => 'position: absolute; top: 0px; left: 0px; color: transparent'},
+                  $$),
               table(
                     Tr(th('Current Download Bandwidth:'),
                        td({id => 'download-bandwidth'},
@@ -2541,6 +2543,9 @@ sub setup_api
 
 sub javascript
 {
+
+  return $ctcs{javascript} if exists $ctcs{javascript};
+
   #############################################################################
   # Yes, my JavaScript is poor: a better scripter than I should refactor this
   # entire block of code at the earliest opportunity
@@ -2553,11 +2558,11 @@ sub javascript
   {
     if (xmlHttp) return xmlHttp;
     try {
-      // Firefox, Opera 8.0+, Safari
+      /* Firefox, Opera 8.0+, Safari */
       xmlHttp=new XMLHttpRequest();
     }
     catch (e) {
-      // Internet Explorer
+      /* Internet Explorer */
       try {
         xmlHttp=new ActiveXObject("Msxml2.XMLHTTP");
       }
@@ -2593,14 +2598,14 @@ sub javascript
             var row_id = torrent["id"];
             var row;
 
-            // If the row's already there, update it.
+            /* If the row's already there, update it. */
 
             row = document.getElementById(row_id);
             if (row)
             {
               update_torrent_row(row, row_id, torrent);
             }
-            else // the row's not there: create it.
+            else /* the row's not there: create it. */
             {
               add_new_torrent(torrent);
             }
@@ -2609,7 +2614,7 @@ sub javascript
           sort_torrents_table();
         }
       };
-      xmlHttp.open("GET", "/current-status")
+      xmlHttp.open("GET", "/current-status");
       xmlHttp.send(null);
     }
     setTimeout('update_with_current_status()', 5000);
@@ -2637,7 +2642,7 @@ sub javascript
     document.getElementById('downloaded-' + row_id).innerHTML = torrent["downloaded"];
     document.getElementById('uploaded-' + row_id).innerHTML = torrent["uploaded"];
     document.getElementById('size-' + row_id).innerHTML = torrent["size"];
-    ratio_element = document.getElementById('ratio-' + row_id)
+    ratio_element = document.getElementById('ratio-' + row_id);
     ratio_element.innerHTML = torrent["ratio"].toFixed(2);
     if (torrent["paused"] == '1' && row.className.search(/paused/) == -1)
     {
@@ -2673,7 +2678,7 @@ sub javascript
   function add_new_torrent(torrent)
   {
     var torrents_table = document.getElementById('torrents');
-    var cell_count = torrent.length + 1; // the +1 is for the action form at the end.
+    var cell_count = torrent.length + 1; /* the +1 is for the action form at the end. */
     var new_row = torrents_table.insertRow(torrents_table.rows.length);
     var completed = parseInt(torrent["percent_complete"]) == 100;
 
@@ -2767,9 +2772,9 @@ sub javascript
 
   function cleanup_dead_torrents(torrent_data)
   {
-    // Finally, go through the rows in the table and delete any that are not in the incoming data
+    /* Finally, go through the rows in the table and delete any that are not in the incoming data */
     var table = document.getElementById('torrents');
-    var index = 1; // Exclude the headings
+    var index = 1; /* Exclude the headings */
     while(index < table.rows.length)
     {
       var id = table.rows[index].id;
@@ -2780,6 +2785,11 @@ sub javascript
     }
   }
 END_JS
+
+  $script =~ s/\n/ /g;
+  $script =~ s/\s+/ /g;
+
+  return $ctcs{javascript} = $script;
 }
 
 ###############################################################################
