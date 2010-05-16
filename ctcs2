@@ -606,31 +606,35 @@ sub handle_write
 sub function_to_handle_request
 {
   my ($message, $client) = @_;
+  my ($command, $params);
 
-  $_ = $message;
+  $message =~ m/^(\S+)\s*(.*)/;
 
-  if (/^CTBW\s+(\d+),\s*(\d+)\s+(\d+),\s*(\d+)/)
+  $command = $1 || sprintf("UNKNOWN: '%s'", $message || '');
+  $params  = $2;
+
+  if ($command eq 'CTBW')
   {
+    $params =~ m/(\d+),\s*(\d+)\s+(?:\d+),\s*(?:\d+)/;
     record_bandwidth($client, $1, $2);
   }
-  elsif (/^CTPEER\s+(.*)/)
+  elsif ($command eq 'CTPEER')
   {
-    torrent_add_peer(torrent_handled_by($client), $1);
+    torrent_add_peer(torrent_handled_by($client), $params);
   }
-  elsif (/^CTCONFIG\s+(.*)/)
+  elsif ($command eq 'CTCONFIG')
   {
-    torrent_store_config(torrent_handled_by($client), $1);
+    torrent_store_config(torrent_handled_by($client), $params);
   }
-  elsif (/^CTFILE\s+(.*)/)
+  elsif ($command eq 'CTFILE')
   {
-    ctcs_log(LOG_DEBUG, 'Got a file: %s', $1);
-    torrent_populate_file_info(torrent_handled_by($client), $1);
+    torrent_populate_file_info(torrent_handled_by($client), $params);
   }
-  elsif (/^CTPEERSTART/)
+  elsif ($command eq 'CTPEERSTART')
   {
     $clients{$client}->{torrent}->{incoming_peers} = [];
   }
-  elsif (/^CTPEERSDONE/)
+  elsif ($command eq 'CTPEERSDONE')
   {
     my $torrent = torrent_handled_by($client);
     ctcs_log(LOG_INFO, q(Received %d peers for '%s'),
@@ -640,48 +644,57 @@ sub function_to_handle_request
     delete $torrent->{incoming_peers};
     $torrent->{last_peers_update} = time();
   }
-  elsif (/^CTSTATUS\s+(.*)/)
+  elsif ($command eq 'CTSTATUS')
   {
     my $torrent_info = torrent_handled_by($client);
-    torrent_set_status($torrent_info, $1);
+    torrent_set_status($torrent_info, $params);
     return exists($torrent_info->{size}) ?
     undef :
       writer_function(\&ctcs_request_detail_command);
   }
-  elsif (/^CTDETAIL\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/)
+  elsif ($command eq 'CTDETAIL')
   {
+    $params =~ m/(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/;
     my $torrent_info = torrent_handled_by($client);
     $torrent_info->{size}       = $1;
     $torrent_info->{piece_size} = $2;
     $torrent_info->{time_now}   = $3;
     $torrent_info->{time_seed}  = $4;
   }
-  elsif (/^CTORRENT\s+([^\s]+)(?:\s+(\d+)\s+(\d+)\s+(.*))?/)
+  elsif ($command eq 'CTORRENT')
   {
+    $params =~ m/([^\s]+)(?:\s+(\d+)\s+(\d+)\s+(.*))?/;
     handle_register_torrent($client, $1, $2, $3, $4);
     autobalance_bandwidth();
     return writer_function( sub { ctcs_protocol() . $CRLF });
   }
-  elsif (/^GET\s+([^\s]+)/)
+  elsif ($command eq 'GET')
   {
+    $params =~ m/^([^\s]+)/;
     my $target = $1;
     my $close_after_write = $message =~ /Connection: close/i;
     return writer_function(sub { handle_send_page($target, $client) }, $close_after_write);
   }
-  elsif (/^POST\s+([^\s]+)/)
+  elsif ($command eq 'POST')
   {
+    $params =~ m/([^\s]+)/;
     my $target = $1;
     return writer_function(sub { handle_form_submission($target, $client, $_)}, 1);
   }
-  elsif (/^DUMP\s*$/)
+  elsif ($command eq 'DUMP')
   {
     return writer_function(\&handle_dump);
   }
-  elsif (/^PROTOCOL\s+0*(\d+)/)
+  elsif ($command eq 'PROTOCOL')
   {
+    $params =~ m/0*(\d+)/;
     $ctcs{protocol} = $1;
   }
-  elsif (/^CTFILESDONE|CTFILESTART|CTCONFIGSTART|CTCONFIGDONE|CTINFO/)
+  elsif ($command eq 'CTFILESDONE'   ||
+	 $command eq 'CTFILESTART'   ||
+	 $command eq 'CTCONFIGSTART' ||
+	 $command eq 'CTCONFIGDONE'  ||
+	 $command eq 'CTINFO')
   {
     # Nothing: just here to avoid triggering the following exception
   }
