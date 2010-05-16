@@ -87,6 +87,7 @@ use constant SUMMARY_FULL  => 2;
 use constant FORM_ENCODING => 'application/x-www-form-urlencoded';
 
 $0         = 'ctcs2';
+STDOUT->autoflush(1);
 
 my $port                      = 8080;
 my $download_limit            = 1000;
@@ -1671,7 +1672,7 @@ sub ctcs_log
   {
     print $log strftime("%H:%M:%S, %a, %b %d %Y", localtime()), ': ';
   }
-  print $log $level->[1], ': ';
+  print $log $level->[1], ' ';
   printf $log $format, @_;
   print $log "\n";
 }
