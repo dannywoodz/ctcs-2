@@ -99,7 +99,6 @@ my $update_connected_torrents = 1;
 $SIG{INT}   = \&cleanup;
 $SIG{TERM}  = \&cleanup;
 $SIG{PIPE}  = 'IGNORE';
-$SIG{ALRM}  = sub { $update_connected_torrents = 1 };
 
 
 ###############################################################################
@@ -232,7 +231,7 @@ ctcs_log(LOG_INFO, 'CTCS Server started on port %d', $port);
 # Main loop
 ###############################################################################
 
-for (my $last_update = time(); defined($server); )
+for (my ($last_update, $now) = (time(), time()); defined($server); $now = time())
 {
   my ($readable, $writable, $errored) = IO::Select::select($readers, $writers, $errors, 1);
 
@@ -240,7 +239,7 @@ for (my $last_update = time(); defined($server); )
   handle_write($_) for @$writable;
   handle_read($_)  for @$readable;
 
-  if ($update_connected_torrents)
+  if ($now > $last_update + 4)
   {
     foreach my $client (torrent_clients())
     {
@@ -254,8 +253,7 @@ for (my $last_update = time(); defined($server); )
       }
       ctcs_update_bandwidth_allocation();
     }
-    $update_connected_torrents = 0;
-    alarm 5;
+    $last_update = $now;
   }
 }
 
