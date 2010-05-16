@@ -529,11 +529,18 @@ sub writer_function
 {
   my $handler = shift;
   my $close_after_write = shift;
-  my $message = $handler->();
-  my $message_length = defined($message) ? length($message) : 0;
+  my $message = undef;
+  my $message_length = 0;
   my $message_offset = 0;
   return sub {
-    return 1 if !defined $message;
+
+    if (!$message)
+    {
+      $message = $handler->();
+      return 1 unless defined $message;
+      $message_length = length($message);
+      $message_offset = 0;
+    }
 
     my $client  = shift;
 
