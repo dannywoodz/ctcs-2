@@ -686,7 +686,7 @@ sub function_to_handle_request
   {
     $params =~ m/([^\s]+)/;
     my $target = $1;
-    return writer_function(sub { handle_form_submission($target, $client, $_)}, 1);
+    return writer_function(sub { handle_form_submission($target, $client, $message)}, 1);
   }
   elsif ($command eq 'DUMP')
   {
