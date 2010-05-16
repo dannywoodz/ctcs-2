@@ -266,7 +266,7 @@ sub cleanup
 {
   if ($server)
   {
-    ctcs_log(LOG_INFO, "Cleaning up");
+    ctcs_log(LOG_INFO, 'Cleaning up');
     $readers->remove($server);
     $server->close();
     undef $server;
@@ -322,7 +322,7 @@ sub register_new_client
   $clients{$client}->{socket}   = $client;
 
   ctcs_log(LOG_INFO,
-           "connection from %s:%d",
+           'connection from %s:%d',
            address_of($client),
            $client->peerport());
 
@@ -339,13 +339,13 @@ sub deregister_client
 
   return if !exists($clients{$client});
 
-  my $hostname = $client->opened() ? address_of($client) : "CLOSED";
+  my $hostname = $client->opened() ? address_of($client) : 'CLOSED';
   my $port     = $client->opened() ? $client->peerport() : -1;
   if (exists($clients{$client}) &&
       exists($clients{$client}->{messages}) &&
       scalar @{$clients{$client}->{messages}} > 0)
   {
-    ctcs_log(LOG_WARNING, "Client being deleted with a non-empty message queue");
+    ctcs_log(LOG_WARNING, 'Client being deleted with a non-empty message queue');
     my $string = '';
     my $handle = IO::Handle->new();
     if (open($handle, '>', \$string))
@@ -375,8 +375,8 @@ sub deregister_client
 
   delete $clients{$client};
   ctcs_log(LOG_INFO,
-           "connection closed%s",
-           (defined($hostname)) ? " from $hostname:$port" : "");
+           'connection closed%s',
+           (defined($hostname)) ? " from $hostname:$port" : '');
   $readers->remove($client) while $readers->exists($client);
   $writers->remove($client) while $writers->exists($client);
 
@@ -404,7 +404,7 @@ sub handle_request
 
   if ($message)
   {
-    ctcs_log(LOG_DEBUG, "Message from %s: '%s'", address_of($client), $message);
+    ctcs_log(LOG_DEBUG, q(Message from %s: '%s'), address_of($client), $message);
     eval {
       my $function = function_to_handle_request($message, $client);
       send_message_function($function, $client) if $function;
@@ -415,7 +415,7 @@ sub handle_request
   {
     if ($! == EAGAIN)
     {
-      ctcs_log(LOG_DEBUG, "EAGAIN is set: will handle request later");
+      ctcs_log(LOG_DEBUG, 'EAGAIN is set: will handle request later');
       $! = 0;
     }
     else
@@ -458,7 +458,7 @@ sub reader_function_for
     open($header, '>', \$header_string) || die $!;
 
     my $initialise = sub {
-      ctcs_log(LOG_DEBUG, "Initialising reader function");
+      ctcs_log(LOG_DEBUG, 'Initialising reader function');
       seek($header, 0, SEEK_SET);
       $header_read    = 0;
       $content_length = 0;
@@ -476,14 +476,14 @@ sub reader_function_for
       {
         return $line if $line !~ /^(?:POST|GET)/ && tell($header) == 0;
         $content_length = $1 if $line =~ /^Content-Length: (\d+)/;
-        ctcs_log(LOG_DEBUG, "Header line: '%s'", $line);
+        ctcs_log(LOG_DEBUG, q(Header line: '%s'), $line);
         print $header $line, "\n";
         $header_read = 1 if $line eq '';
       }
       return undef unless $header_read;
 
-      ctcs_log(LOG_DEBUG, "Content-Length: %s", $content_length);
-      ctcs_log(LOG_DEBUG, "BEFORE: Length of body is %d", length($body));
+      ctcs_log(LOG_DEBUG, 'Content-Length: %s', $content_length);
+      ctcs_log(LOG_DEBUG, 'BEFORE: Length of body is %d', length($body));
 
       while ($content_length > 0 &&
              length($body) < $content_length &&
@@ -492,13 +492,13 @@ sub reader_function_for
         $body = $result;
       }
 
-      ctcs_log(LOG_DEBUG, "AFTER: Length of body is %d", length($body));
-      ctcs_log(LOG_DEBUG, "Body is '%s'", $body);
+      ctcs_log(LOG_DEBUG, 'AFTER: Length of body is %d', length($body));
+      ctcs_log(LOG_DEBUG, q(Body is '%s'), $body);
 
       return undef if (!defined($result) && length($body) < $content_length);
       return undef unless length($body) == $content_length;
 
-      ctcs_log(LOG_DEBUG, "Body: %s", $body);
+      ctcs_log(LOG_DEBUG, 'Body: %s', $body);
 
       print $header $body if $body;
 
@@ -534,10 +534,10 @@ sub writer_function
 
     my $client  = shift;
 
-    ctcs_log(LOG_DEBUG, "Writing %d bytes of length %d, starting at %d",
+    ctcs_log(LOG_DEBUG, 'Writing %d bytes of length %d, starting at %d',
              $message_length - $message_offset, $message_length,
              $message_offset);
-    ctcs_log(LOG_DEBUG, "Message: %s", $message);
+    ctcs_log(LOG_DEBUG, 'Message: %s', $message);
 
     my $written = syswrite($client,
                            $message,
@@ -546,21 +546,21 @@ sub writer_function
     if (!defined($written))
     {
       ctcs_log(LOG_WARNING,
-               "Failed to write message '%s', starting at index %d",
+               q(Failed to write message '%s', starting at index %d),
                $message,
                $message_length - $message_offset);
       return 1; # The message is effectively finished if it has errored
     }
 
-    ctcs_log(LOG_DEBUG, "Wrote %d bytes of a %d byte message",
+    ctcs_log(LOG_DEBUG, 'Wrote %d bytes of a %d byte message',
              $written, $message_length);
 
     $message_offset += $written;
     my $finished = ($message_offset == $message_length);
 
     ctcs_log(LOG_DEBUG,
-             "Wrote %d bytes, leaving %d remaining. Message is%s finished",
-             $written, $message_length - $message_offset, $finished ? "" : " NOT");
+             'Wrote %d bytes, leaving %d remaining. Message is%s finished',
+             $written, $message_length - $message_offset, $finished ? '' : ' NOT');
 
     if ($close_after_write && $finished)
     {
@@ -620,7 +620,7 @@ sub function_to_handle_request
   }
   elsif (/^CTFILE\s+(.*)/)
   {
-    ctcs_log(LOG_DEBUG, "Got a file: %s", $1);
+    ctcs_log(LOG_DEBUG, 'Got a file: %s', $1);
     torrent_populate_file_info(torrent_handled_by($client), $1);
   }
   elsif (/^CTPEERSTART/)
@@ -630,7 +630,7 @@ sub function_to_handle_request
   elsif (/^CTPEERSDONE/)
   {
     my $torrent = torrent_handled_by($client);
-    ctcs_log(LOG_INFO, "Received %d peers for '%s'",
+    ctcs_log(LOG_INFO, q(Received %d peers for '%s'),
              peer_count_for($client),
              $torrent->{name});
     $torrent->{peers} = $torrent->{incoming_peers};
@@ -657,7 +657,7 @@ sub function_to_handle_request
   {
     handle_register_torrent($client, $1, $2, $3, $4);
     autobalance_bandwidth();
-    return writer_function( sub { ctcs_protocol() . "\r\n" });
+    return writer_function( sub { ctcs_protocol() . $CRLF });
   }
   elsif (/^GET\s+([^\s]+)/)
   {
@@ -749,7 +749,7 @@ sub handle_form_submission
 
   ctcs_log(LOG_DEBUG, $request);
 
-  if ($target eq "/")
+  if ($target eq '/')
   {
     my $upload_limit              =  $query->param('ulimit');
     my $download_limit            =  $query->param('dlimit');
@@ -759,11 +759,11 @@ sub handle_form_submission
     $ctcs{auto_refresh}           =  ($auto_refresh && int($auto_refresh)) || 0;
     autobalance_bandwidth();
     return with_output_to_string {
-      print "HTTP/1.1 302 Found\r\n";
+      print 'HTTP/1.1 302 Found', $CRLF;
       print $query->redirect(-uri => '/');
     }
   }
-  elsif ($target eq "/status-action")
+  elsif ($target eq '/status-action')
   {
     my $action  = $query->param('action');
     my $id      = CGI::unescape($query->param('torrent-id'));
@@ -775,7 +775,7 @@ sub handle_form_submission
     torrent_update($torrent) if $action eq 'Update';
 
     return with_output_to_string {
-      print "HTTP/1.1 302 Found\r\n";
+      print 'HTTP/1.1 302 Found', $CRLF;
       print $query->redirect(-uri => '/');
     }
   }
@@ -804,13 +804,13 @@ sub handle_form_submission
         # When changing CTCS server, *don't* go back to the info for this page:
         # it belongs to another server
         #######################################################################
-        $page = "/" if $option eq 'ctcs_server';
+        $page = '/' if $option eq 'ctcs_server';
         torrent_set_config($torrent, $option, $params->{$option});
       }
     }
 
     return with_output_to_string {
-      print "HTTP/1.1 302 Found\r\n";
+      print 'HTTP/1.1 302 Found', $CRLF;
       print $query->redirect(-uri => $page);
     }
   }
@@ -835,7 +835,7 @@ sub handle_form_submission
         elsif ($operation eq 'automanage')
         {
           ctcs_log(LOG_INFO,
-                   "Automatically managing bandwidth allocation for '%s'",
+                   q(Automatically managing bandwidth allocation for '%s'),
                    $torrent->{name});
           delete $torrent->{manual_upload_limit};
           delete $torrent->{manual_download_limit};
@@ -843,14 +843,14 @@ sub handle_form_submission
       }
     } keys %$params;
     return with_output_to_string {
-      print "HTTP/1.1 302 Found\r\n";
+      print 'HTTP/1.1 302 Found', $CRLF;
       print $query->redirect(-uri => '/advanced-limits');
     }
   }
   elsif ($target =~ '^/api/(.*)$')
   {
     my $params = $query->Vars;
-    ctcs_log(LOG_INFO, "Processing API call '%s'", $1);
+    ctcs_log(LOG_INFO, q(Processing API call '%s'), $1);
     return handle_api_call($1, $params, $client);
   }
 
@@ -867,7 +867,7 @@ sub handle_api_call
 sub unknown_api_call
 {
   my ($path, $client) = @_;
-  ctcs_log(LOG_WARNING, "Unknown API call: '%s'", $path);
+  ctcs_log(LOG_WARNING, q(Unknown API call: '%s'), $path);
   return json_encode({ 'error' => "Unknown API call '$path'"});
 }
 
@@ -917,10 +917,10 @@ sub page_content
   my $page = shift;
 
   return json_status() if ($page eq '/current-status');
-  return html_page(\&index_page) if $page eq "/";
+  return html_page(\&index_page) if $page eq '/';
   return html_page(\&torrent_info_page, $1, { noscript => 1}) if $page =~ /^\/?torrent\/(.+)$/;
   return html_page(\&advanced_limits_page, { noscript => 1}) if $page eq '/advanced-limits';
-  return html_page(\&debug_page, { nostyle => 1, noscript => 1 }) if $page eq "/debug";
+  return html_page(\&debug_page, { nostyle => 1, noscript => 1 }) if $page eq '/debug';
 
   return undef;
 }
@@ -1078,7 +1078,7 @@ sub pretty_print_json_string_ref
         next;
       }
 
-      if ( $char eq "," )
+      if ( $char eq ',' )
       {
         print $char, "\n";
         print ' ' x $offsets[$#offsets];
@@ -1109,7 +1109,7 @@ sub human_readable_time
   my $hours   = ($seconds/3600);
   $seconds    =  $seconds % 60;
 
-  return sprintf("%d:%02d:%02d", $hours, $minutes, $seconds);
+  return sprintf('%d:%02d:%02d', $hours, $minutes, $seconds);
 }
 
 ###############################################################################
@@ -1130,7 +1130,7 @@ sub calculate_time_remaining
   }
   else
   {
-    return "-";
+    return '-';
   }
 }
 
@@ -1200,7 +1200,7 @@ sub index_page
     {
       my $torrent          = $torrent_info[$count];
       my $torrent_id       = CGI::escape($torrent->{ctcs_id});
-      my $torrent_link     = a({href=> "/torrent/" . CGI::escape($torrent->{ctcs_id})}, $torrent->{name});
+      my $torrent_link     = a({href=> '/torrent/' . CGI::escape($torrent->{ctcs_id})}, $torrent->{name});
       my $upload_rate      = human_readable($torrent->{upload_rate});
       my $download_rate    = human_readable($torrent->{download_rate});
       my $total_seeders    = $torrent->{total_seeders};
@@ -1233,7 +1233,7 @@ sub index_page
       $green = 255 if $ratio eq 'Inf.' || $ratio > 255;
 
       my $row_colour       = sprintf('#%06x', ($red << 16 | $green << 8 | 0));
-      my $pause_unpause = $torrent->{config}->{pause}->{value} == 1 ? "Resume" : "Pause";
+      my $pause_unpause = $torrent->{config}->{pause}->{value} == 1 ? 'Resume' : 'Pause';
 
       $torrent->{config}->{pause}->{value} == 1 && ($row_class .= ' paused');
       print Tr({class => $row_class,
@@ -1273,7 +1273,7 @@ sub formatted_ratio_for
   my $raw_ratio        = ($torrent->{uploaded} == 0) ? 0 :
   ($torrent->{downloaded} == 0) ? 'Inf.' :
   $torrent->{uploaded} / $torrent->{downloaded};
-  return ($raw_ratio eq 'Inf.') ? 'Inf.' : sprintf("%.02f", $raw_ratio);
+  return ($raw_ratio eq 'Inf.') ? 'Inf.' : sprintf('%.02f', $raw_ratio);
 }
 
 ###############################################################################
@@ -1312,7 +1312,7 @@ sub advanced_limits_page
     my @clients = torrent_clients();
     print h2({id => 'title'}, 'Advanced Bandwidth Limits');
     print h3({style => 'text-align: center' },
-             sprintf("Global Upload Limit: %s/s; Global Download Limit: %s/s",
+             sprintf('Global Upload Limit: %s/s; Global Download Limit: %s/s',
                      human_readable($ctcs{upload_limit}),
                      human_readable($ctcs{download_limit})));
     printf '<form action="/set-advanced-limits" method="post" enctype="%s">', FORM_ENCODING;
@@ -1488,16 +1488,16 @@ sub handle_dump
     print "\nREADERS\n\n";
     map { printf "%s: %s:%d (%s)\n",
           $_,
-          $_ == $server ? "SERVER" : address_of($_),
+          $_ == $server ? 'SERVER' : address_of($_),
           $_ == $server ? $ctcs{port} : $_->peerport(),
-          $_ == $server ? "SERVER" : exists($clients{$_}->{torrent}) ? "TORRENT: " . $clients{$_}->{torrent}->{name} : "WEB"
+          $_ == $server ? 'SERVER' : exists($clients{$_}->{torrent}) ? 'TORRENT: ' . $clients{$_}->{torrent}->{name} : 'WEB'
         } $readers->handles;
     print "\nWRITERS\n\n";
     map { printf "%s: %s:%d (%s)\n",
           $_,
-          $_ == $server ? "SERVER" : address_of($_),
+          $_ == $server ? 'SERVER' : address_of($_),
           $_ == $server ? $ctcs{port} : $_->peerport(),
-          $_ == $server ? "SERVER" : exists($clients{$_}->{torrent}) ? "TORRENT: " . $clients{$_}->{torrent}->{name} : "WEB"
+          $_ == $server ? 'SERVER' : exists($clients{$_}->{torrent}) ? 'TORRENT: ' . $clients{$_}->{torrent}->{name} : 'WEB'
         } $writers->handles;
     print "\nCLIENTS\n\n";
     $json = json_encode(\%clients);
@@ -1667,7 +1667,7 @@ sub ctcs_log
   my $log = $ctcs{log_file_handle} || \*STDOUT;
   if ($ctcs{log_timestamps})
   {
-    print $log strftime("%H:%M:%S, %a, %b %d %Y", localtime()), ": ";
+    print $log strftime("%H:%M:%S, %a, %b %d %Y", localtime()), ': ';
   }
   printf $log $format, @_;
   print $log "\n";
@@ -2202,7 +2202,7 @@ sub torrent_set_bandwidth_limit
     return;
   }
   ctcs_log(LOG_INFO,
-           "Setting %s limit of '%s' to %d",
+           q(Setting %s limit of '%s' to %d),
            $direction,
            $torrent->{name},
            $limit);
@@ -2251,14 +2251,14 @@ sub torrent_set_config
   if (!defined($client))
   {
     ctcs_log(LOG_WARNING,
-             "Cannot set config on torrent '%s': it has no active connection",
+             q(Cannot set config on torrent '%s': it has no active connection),
              $torrent->{name});
     return;
   }
   else
   {
     ctcs_log(LOG_INFO,
-             "Setting config option '%s' of '%s' to '%s'",
+             q(Setting config option '%s' of '%s' to '%s'),
              $config_option, $torrent->{name}, $value);
   }
   send_message(sprintf("CTCONFIG %s %s\r\n", $config_option, $value), $client);
@@ -2279,7 +2279,7 @@ sub human_readable
   my $format       = shift || 'd';
   my $small_format = shift || $format;
 
-  return "" if !defined($number);
+  return '' if !defined($number);
   $number          = $1 if $number =~ /(\d+)/;
 
   my @range   = ('B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB'); # Future proofing...
@@ -2304,8 +2304,8 @@ sub address_of
   unless (exists $clients{$client}->{address})
   {
     $clients{$client}->{address} = $client->opened() ?
-      (gethostbyaddr($client->peeraddr(), AF_INET))[0] :
-      "CLOSED";
+    (gethostbyaddr($client->peeraddr(), AF_INET))[0] :
+    'CLOSED';
   }
   return $clients{$client}->{address};
 }
@@ -2516,7 +2516,7 @@ sub setup_api
 
   $api->{'get-config'} = apicall {
     my @configs;
-    foreach my $torrent(@{$_[1]})
+    foreach my $torrent (@{$_[1]})
     {
       push(@configs, { 'torrent' => $torrent->{name},
 		       'id'      => $torrent->{ctcs_id},
@@ -2527,9 +2527,10 @@ sub setup_api
   $api->{'set-log-level'} = apicall {
     my $log_level = $_[0]->{'log-level'};
     return ( $log_level =~ /^\d+$/ && $log_level >= LOG_MIN && $log_level <= LOG_MAX ) ?
-    { 'log-level' => ($ctcs{log_level} = $log_level) } :
-    die sprintf(qq(set-log-level must be an integer from %s (most verbose) to %s (least verbose), not '%s'\n),
-		LOG_MIN, LOG_MAX, $log_level);
+    {
+     'log-level' => ($ctcs{log_level} = $log_level) } :
+     die sprintf(qq(set-log-level must be an integer from %s (most verbose) to %s (least verbose), not '%s'\n),
+		 LOG_MIN, LOG_MAX, $log_level);
   };
   $api->{'get-log-level'} = apicall {
     return { 'log-level' => $ctcs{log_level} };
