@@ -407,6 +407,7 @@ sub handle_request
 
   if ($message)
   {
+    chomp($message);
     ctcs_log(LOG_DEBUG, q(Message from %s: '%s'), address_of($client), $message);
     eval {
       my $function = function_to_handle_request($message, $client);
