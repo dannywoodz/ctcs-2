@@ -86,18 +86,21 @@ use constant SUMMARY_BRIEF => 1;
 use constant SUMMARY_FULL  => 2;
 use constant FORM_ENCODING => 'application/x-www-form-urlencoded';
 
-$SIG{INT}  = \&cleanup;
-$SIG{TERM} = \&cleanup;
-$SIG{PIPE} = 'IGNORE';
-STDOUT->autoflush(1);
 $0         = 'ctcs2';
 
-my $port                    = 8080;
-my $download_limit          = 1000;
-my $upload_limit            = 50;
-my $suppress_log_timestamps = 0;
-my $current_id              = 1;
-my $help                    = undef;
+my $port                      = 8080;
+my $download_limit            = 1000;
+my $upload_limit              = 50;
+my $suppress_log_timestamps   = 0;
+my $current_id                = 1;
+my $help                      = undef;
+my $update_connected_torrents = 1;
+
+$SIG{INT}   = \&cleanup;
+$SIG{TERM}  = \&cleanup;
+$SIG{PIPE}  = 'IGNORE';
+$SIG{ALRM}  = sub { $update_connected_torrents = 1 };
+
 
 ###############################################################################
 # The core data structures used by the server.
@@ -237,7 +240,7 @@ for (my $last_update = time(); defined($server); )
   handle_write($_) for @$writable;
   handle_read($_)  for @$readable;
 
-  if (time() != $last_update)
+  if ($update_connected_torrents)
   {
     foreach my $client (torrent_clients())
     {
@@ -251,7 +254,8 @@ for (my $last_update = time(); defined($server); )
       }
       ctcs_update_bandwidth_allocation();
     }
-    $last_update = time();
+    $update_connected_torrents = 0;
+    alarm 5;
   }
 }
 
@@ -2544,15 +2548,12 @@ sub setup_api
 
 sub javascript
 {
-
-  return $ctcs{javascript} if exists $ctcs{javascript};
-
   #############################################################################
   # Yes, my JavaScript is poor: a better scripter than I should refactor this
   # entire block of code at the earliest opportunity
   #############################################################################
 
-  my $script=<<END_JS;
+  my $script=<<'END_JS';
   var xmlHttp = null;
 
   function ajaxObject()
@@ -2787,10 +2788,7 @@ sub javascript
   }
 END_JS
 
-  $script =~ s/\n/ /g;
-  $script =~ s/\s+/ /g;
-
-  return $ctcs{javascript} = $script;
+  return $script;
 }
 
 ###############################################################################
@@ -2799,7 +2797,7 @@ END_JS
 
 sub stylesheet
 {
-  my $sheet = <<END_CSS;
+  my $sheet = <<'END_CSS';
 body { font-family: Arial, sans-serif; margin-left: 5%; margin-right: 5%; margin-top: 0%; margin-bottom: 5%; }
 #title { text-align: center; }
 .torrent-even, .peer-even, .file-even { background-color: #ded; }
