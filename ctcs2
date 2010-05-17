@@ -1532,20 +1532,25 @@ sub handle_dump
 sub record_bandwidth
 {
   my ($client, $dlrate, $ulrate) = @_;
-  my $info = torrent_handled_by($client);
-  $info->{upload_rate}    = $ulrate;
-  $info->{download_rate}  = $dlrate;
-  $info->{rec_bw_index} ||= 0;
-  my $write_index         = \($info->{rec_bw_index} ||= 0);
+  my $torrent = torrent_handled_by($client);
+  $torrent->{upload_rate}   = $ulrate;
+  $torrent->{download_rate} = $dlrate;
+  my $write_index           = \($torrent->{rec_bw_index} ||= 0);
 
-  my $dl_hist= $info->{download_rate_history};
-  $dl_hist->[$$write_index++] = $dlrate;
+  $torrent->{download_rate_history}->[$$write_index++] = $dlrate;
   $$write_index = 0 if $$write_index >= 100;
 
-  my $total = exists($info->{total_chunks}) ? $info->{total_chunks} : 0;
-  my $downloaded = exists($info->{downloaded_chunks}) ? $info->{downloaded_chunks} : 0;
-  $info->{percent_complete} = $total == 0 ?
-  0 : int(($downloaded / $total) * 100);
+  my $total = exists($torrent->{total_chunks}) ?
+    $torrent->{total_chunks} :
+    0;
+
+  my $downloaded = exists($torrent->{downloaded_chunks}) ?
+    $torrent->{downloaded_chunks} :
+    0;
+
+  $torrent->{percent_complete} = $total == 0 ?
+    0 :
+    int(($downloaded / $total) * 100);
 }
 
 ###############################################################################
