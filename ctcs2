@@ -1235,15 +1235,11 @@ sub index_page
       my $uploaded         = human_readable($torrent->{uploaded}, '0.2f');
       my $size             = human_readable($torrent->{size}, 'd', '0.2f');
       my $percent_complete = sprintf('%d%%', $torrent->{percent_complete});
-      my $smoothed_dl_rate = 0;
-
-      $smoothed_dl_rate += $_ for @{$torrent->{download_rate_history}};
-      $smoothed_dl_rate = $smoothed_dl_rate/$#{$torrent->{download_rate_history}} if $smoothed_dl_rate > 0;
 
       my $time_to_finish   = calculate_time_remaining($torrent->{downloaded_chunks},
                                                       $torrent->{total_chunks},
                                                       $torrent->{piece_size},
-                                                      $smoothed_dl_rate);
+                                                      smoothed_dl_rate($torrent));
       my $raw_ratio        = ($torrent->{uploaded} == 0) ? 0 :
       ($torrent->{downloaded} == 0) ? 'Inf.' :
       $torrent->{uploaded} / $torrent->{downloaded};
@@ -1546,13 +1542,6 @@ sub record_bandwidth
   $dl_hist->[$$write_index++] = $dlrate;
   $$write_index = 0 if $$write_index >= 100;
 
-  my $smoothed_dl_rate= 0;
-  my $dl_count= $#{$dl_hist};
-
-  $smoothed_dl_rate += $_ for @{$dl_hist};
-
-  $info->{smoothed_dl_rate} = $dl_count == 0 ? 0 : $smoothed_dl_rate/$dl_count;
-
   my $total = exists($info->{total_chunks}) ? $info->{total_chunks} : 0;
   my $downloaded = exists($info->{downloaded_chunks}) ? $info->{downloaded_chunks} : 0;
   $info->{percent_complete} = $total == 0 ?
@@ -1587,7 +1576,6 @@ sub handle_register_torrent
   $info->{available_chunks}      = 0;
   $info->{download_rate}         = 0;
   $info->{download_rate_history} = [];
-  $info->{smoothed_dl_rate}      = 0;
   $info->{upload_rate}           = 0;
   $info->{downloaded}            = 0;
   $info->{uploaded}              = 0;
@@ -1599,6 +1587,15 @@ sub handle_register_torrent
 
   $clients{$socket}->{torrent} = $info;
 
+}
+
+sub smoothed_dl_rate
+{
+  my $torrent = $_[0];
+  my $smoothed_dl_rate = 0;
+  $smoothed_dl_rate += $_ for @{$torrent->{download_rate_history}};
+  $smoothed_dl_rate = $smoothed_dl_rate/$#{$torrent->{download_rate_history}} if $smoothed_dl_rate > 0;
+  return $smoothed_dl_rate;
 }
 
 ###############################################################################
@@ -2355,7 +2352,7 @@ sub torrent_summary
     $data->{time_remaining}   = calculate_time_remaining($torrent->{downloaded_chunks},
 							 $torrent->{total_chunks},
 							 $torrent->{piece_size},
-							 $torrent->{smoothed_dl_rate});
+							 smoothed_dl_rate($torrent));
     $data->{download_rate}    = human_readable($torrent->{download_rate}) . '/s';
     $data->{upload_rate}      = human_readable($torrent->{upload_rate}) . '/s';
     $data->{seeders}          = $torrent->{active_seeders} . '/' . $torrent->{total_seeders};
