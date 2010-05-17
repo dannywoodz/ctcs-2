@@ -1634,7 +1634,7 @@ sub line_reader_function
     my $external_read_size =
     (defined($bytes_requested) && $bytes_requested >= $buffer_length) ?
     $bytes_requested - $buffer_length :
-    ($buffer               =~ tr/\n/\n/d) ? 0 :
+    ($buffer               =~ tr/\n/\n/) ? 0 :
     1024;
 
     ###########################################################################
