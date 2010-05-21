@@ -616,10 +616,7 @@ sub function_to_handle_request
   my ($message, $client) = @_;
   my ($command, $params);
 
-  $message =~ m/^(\S+)\s*(.*)/;
-
-  $command = $1 || sprintf("UNKNOWN: '%s'", $message || '');
-  $params  = $2;
+  ($command, $params) = split(' ', $message, 2);
 
   if ($command eq 'CTBW')
   {
@@ -997,8 +994,7 @@ sub json_encode
 
 sub json_encode_to_stream
 {
-  my $entity = shift;
-  my $stream = shift;
+  my ($entity, $stream) = @_;
   my $type   = ref($entity);
 
   if ( $type eq 'ARRAY' )
