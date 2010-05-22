@@ -2666,7 +2666,7 @@ sub javascript
     document.getElementById('uploaded-' + row_id).innerHTML = torrent["uploaded"];
     document.getElementById('size-' + row_id).innerHTML = torrent["size"];
     ratio_element = document.getElementById('ratio-' + row_id);
-    ratio_element.innerHTML = torrent["ratio"].toFixed(2);
+    ratio_element.innerHTML = torrent["ratio"] == "Inf." ? "Inf." : torrent["ratio"].toFixed(2);
     if (torrent["paused"] == '1' && row.className.search(/paused/) == -1)
     {
       row.className = row.className + ' paused';
