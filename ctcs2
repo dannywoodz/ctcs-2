@@ -66,6 +66,7 @@ BSD
 use IO::Socket qw($CRLF AF_INET SOMAXCONN SOCK_STREAM);
 use IO::Select;
 use IO::Handle;
+use Scalar::Util;
 use Socket 'TCP_NODELAY';
 use Errno 'EAGAIN';
 use CGI qw(:standard);
@@ -548,7 +549,6 @@ sub writer_function
     ctcs_log(LOG_DEBUG, 'Writing %d bytes of length %d, starting at %d',
              $message_length - $message_offset, $message_length,
              $message_offset);
-    ctcs_log(LOG_DEBUG, 'Message: %s', $message);
 
     my $written = syswrite($client,
                            $message,
@@ -696,10 +696,10 @@ sub function_to_handle_request
     $ctcs{protocol} = $1;
   }
   elsif ($command eq 'CTFILESDONE'   ||
-	 $command eq 'CTFILESTART'   ||
-	 $command eq 'CTCONFIGSTART' ||
-	 $command eq 'CTCONFIGDONE'  ||
-	 $command eq 'CTINFO')
+         $command eq 'CTFILESTART'   ||
+         $command eq 'CTCONFIGSTART' ||
+         $command eq 'CTCONFIGDONE'  ||
+         $command eq 'CTINFO')
   {
     # Nothing: just here to avoid triggering the following exception
   }
@@ -926,11 +926,11 @@ sub html_page
   $content = $content->(@_) if ref($content) eq 'CODE';
 
   return join('',
-	      start_html(-title => 'CTCS 2',
-			 -script => $script,
-			 -head => style({type => 'text/css'}, $style)),
-	      $content,
-	      end_html());
+              start_html(-title => 'CTCS 2',
+                         -script => $script,
+                         -head => style({type => 'text/css'}, $style)),
+              $content,
+              end_html());
 }
 
 sub page_content
@@ -951,8 +951,8 @@ sub json_status
   my ($dl, $ul) = total_used_bandwidth();
   my @statuses  = status_of_multiple_torrents(all_torrents());
   my $data      = { 'download' => human_readable($dl) . '/s',
-		    'upload'   => human_readable($ul) . '/s',
-		    'torrents' => \@statuses };
+                    'upload'   => human_readable($ul) . '/s',
+                    'torrents' => \@statuses };
   return json_encode($data);
 }
 
@@ -1023,15 +1023,14 @@ sub json_encode_to_stream
     {
       print $stream 'null';
     }
-    elsif ( $entity =~ /^\d+(?:\.\d+)?$/ )
+    elsif ( Scalar::Util::looks_like_number($entity) )
     {
       print $stream $entity;
     }
     else
     {
-      my $string = $entity . '';
-      $string =~ s/"/\\"/g;
-      printf $stream '"%s"', $string;
+      $entity =~ s/"/\\"/g;
+      printf $stream '"%s"', $entity;
     }
   }
 
@@ -1168,16 +1167,19 @@ sub index_page
     my ($download_bandwidth, $upload_bandwidth) = total_used_bandwidth();
     my $current_download_field = human_readable($download_bandwidth);
     my $current_upload_field = human_readable($upload_bandwidth);
-    my $download_field = textfield({name=> 'dlimit',
-                                    value => ($ctcs{download_limit} / 1024),
+    my $download_field = textfield({name      => 'dlimit',
+                                    value     => ($ctcs{download_limit} / 1024),
                                     maxlength => 6,
-                                    size => 6});
-    my $upload_field = textfield({name=> 'ulimit',
-                                  value=> ($ctcs{upload_limit} / 1024),
+                                    tabindex  => 1,
+                                    size      => 6});
+    my $upload_field = textfield({name      => 'ulimit',
+                                  value     => ($ctcs{upload_limit} / 1024),
                                   maxlength => 6,
-                                  size => 6});
-    my $submit_button = submit({name=>'submit-bandwidth-changes',
-                                value=>'Apply Changes'});
+                                  tabindex  => 2,
+                                  size      => 6});
+    my $submit_button = submit({name     => 'submit-bandwidth-changes',
+                                value    => 'Apply Changes',
+                                tabindex => 3});
 
     printf '<form method="post" action="/" enctype="%s">', FORM_ENCODING;
     print div({id => 'global-bandwidth-limits'},
@@ -1195,11 +1197,12 @@ sub index_page
                     Tr(th('Global Upload Limit:'),
                        td($upload_field, ' KB/s')),
                     Tr(th('Auto-Refresh:'),
-                       td(checkbox(-name    => 'auto-refresh',
-                                   -label   => '',
-                                   -value   => '1',
-                                   -id      => 'auto-refresh',
-                                   -checked => $ctcs{auto_refresh}))),
+                       td(checkbox(-name     => 'auto-refresh',
+                                   -label    => '',
+                                   -value    => '1',
+                                   -id       => 'auto-refresh',
+                                   -tabindex => 4,
+                                   -checked  => $ctcs{auto_refresh}))),
                     Tr(td(a({href  => '/advanced-limits',
                              title => 'Fine-grained control over bandwidth limits'},
                             'Advanced Limits')),
@@ -1406,7 +1409,7 @@ sub ctcs_config_table
       print Tr({class => ($count % 2 == 0) ? 'peer-even' : 'peer-odd'},
                td($config{$config_options[$count]}->{short_desc}),
                td(ctcs_config_table_widget($config_options[$count],
-					   $config{$config_options[$count]})),
+                                           $config{$config_options[$count]})),
                td($config{$config_options[$count]}->{long_desc}));
     }
     print Tr(td(), td(submit(-value => 'Apply Changes')), td());
@@ -1705,8 +1708,7 @@ sub ctcs_log
 
 sub torrent_handled_by
 {
-  my $client = shift;
-  return $clients{$client}->{torrent};
+  return $clients{$_[0]}->{torrent};
 }
 
 ###############################################################################
@@ -2004,20 +2006,20 @@ sub torrent_set_status
 
   # Apologies for the horrendous pattern match.
   $status_line =~ m!^
-		    (\d+):(\d+)/       # Active seeds, and total seeders
-		    (\d+):(\d+)/       # Active leechers, and total leechers
-		    (\d+)              # Total connections
-		    \s+
-		    (\d+)/(\d+)/(\d+)  # Chunks downloaded, total, and available
-		    \s+
-		    (\d+),(\d+)        # Download/upload rates
-		    \s+
-		    (\d+),(\d+)        # Total downloaded/uploaded
-		    \s+
-		    (\d+),(\d+)        # Download/upload limits
-		    \s+
-		    (\d+)              # Cache used
-		   !x;
+                    (\d+):(\d+)/       # Active seeds, and total seeders
+                    (\d+):(\d+)/       # Active leechers, and total leechers
+                    (\d+)              # Total connections
+                    \s+
+                    (\d+)/(\d+)/(\d+)  # Chunks downloaded, total, and available
+                    \s+
+                    (\d+),(\d+)        # Download/upload rates
+                    \s+
+                    (\d+),(\d+)        # Total downloaded/uploaded
+                    \s+
+                    (\d+),(\d+)        # Download/upload limits
+                    \s+
+                    (\d+)              # Cache used
+                   !x;
 
   $torrent_info->{active_seeders}     = $1;
   $torrent_info->{total_seeders}      = $2;
@@ -2101,7 +2103,7 @@ sub string_config_validator
 {
   my ($element, $value, $element_name, $torrent_name) = @_;
   ctcs_log( LOG_DEBUG, q(Validating string value '%s' for option '%s' of '%s'),
-	    $value, $element_name, $torrent_name );
+            $value, $element_name, $torrent_name );
 
   return
   defined($value)              &&
@@ -2116,7 +2118,7 @@ sub integer_config_validator
 {
   my ($element, $value, $element_name, $torrent_name) = @_;
   ctcs_log( LOG_DEBUG, q(Validating integer value '%s' for option '%s' of '%s'),
-	    $value, $element_name, $torrent_name );
+            $value, $element_name, $torrent_name );
 
   return 0 unless defined($value) && $value =~ /^\d+$/;
   return 0 unless defined($element->{type}) && $element->{type} eq 'I';
@@ -2130,7 +2132,7 @@ sub float_config_validator
 {
   my ($element, $value, $element_name, $torrent_name) = @_;
   ctcs_log( LOG_DEBUG, q(Validating float value '%s' for option '%s' of '%s'),
-	    $value, $element_name, $torrent_name );
+            $value, $element_name, $torrent_name );
 
   return 0 unless defined($value) && $value =~ /^\d+(?:\.\d+)?$/;
   return 0 unless defined($element->{type}) && $element->{type} eq 'F';
@@ -2142,7 +2144,7 @@ sub boolean_config_validator
 {
   my ($element, $value, $element_name, $torrent_name) = @_;
   ctcs_log( LOG_DEBUG, q(Validating boolean value '%s' for option '%s' of '%s'),
-	    $value, $element_name, $torrent_name );
+            $value, $element_name, $torrent_name );
 
   return $value == 1 || $value == 0;
 }
@@ -2351,9 +2353,9 @@ sub torrent_summary
   {
     $data->{percent_complete} = $torrent->{percent_complete};
     $data->{time_remaining}   = calculate_time_remaining($torrent->{downloaded_chunks},
-							 $torrent->{total_chunks},
-							 $torrent->{piece_size},
-							 smoothed_dl_rate($torrent));
+                                                         $torrent->{total_chunks},
+                                                         $torrent->{piece_size},
+                                                         smoothed_dl_rate($torrent));
     $data->{download_rate}    = human_readable($torrent->{download_rate}) . '/s';
     $data->{upload_rate}      = human_readable($torrent->{upload_rate}) . '/s';
     $data->{seeders}          = $torrent->{active_seeders} . '/' . $torrent->{total_seeders};
@@ -2407,8 +2409,8 @@ sub apicall(&)
       ctcs_log( LOG_DEBUG, 'API call taking torrent IDs from explicit parameters \'%s\'', $params->{torrents} );
       foreach my $id (split(/,/, $params->{torrents}))
       {
-	my $torrent = get_torrent_by_id($id);
-	push(@torrents, $torrent) if $torrent;
+        my $torrent = get_torrent_by_id($id);
+        push(@torrents, $torrent) if $torrent;
       }
       $explicit_parameters = 1;
     }
@@ -2531,12 +2533,12 @@ sub setup_api
     {
       if ( exists($_[0]->{$key}) && torrent_set_config( $torrent, $key, $_[0]->{$key} ) )
       {
-	$config_copy{$key}->{value} = $_[0]->{$key};
+        $config_copy{$key}->{value} = $_[0]->{$key};
       }
     }
     return { 'torrent' => $torrent->{name},
-	     'id'      => $torrent->{ctcs_id},
-	     'config'  => \%config_copy };
+             'id'      => $torrent->{ctcs_id},
+             'config'  => \%config_copy };
   };
 
   $api->{'get-config'} = apicall {
@@ -2544,8 +2546,8 @@ sub setup_api
     foreach my $torrent (@{$_[1]})
     {
       push(@configs, { 'torrent' => $torrent->{name},
-		       'id'      => $torrent->{ctcs_id},
-		       'config'  => $torrent->{config} });
+                       'id'      => $torrent->{ctcs_id},
+                       'config'  => $torrent->{config} });
     }
     return { 'configs' => \@configs };
   };
@@ -2555,7 +2557,7 @@ sub setup_api
     {
      'log-level' => ($ctcs{log_level} = $log_level) } :
      die sprintf(qq(set-log-level must be an integer from %s (most verbose) to %s (least verbose), not '%s'\n),
-		 LOG_MIN, LOG_MAX, $log_level);
+                 LOG_MIN, LOG_MAX, $log_level);
   };
   $api->{'get-log-level'} = apicall {
     return { 'log-level' => $ctcs{log_level} };
@@ -2838,7 +2840,7 @@ td.title { text-align: left; }
 .ok-ratio { color: #992; }
 #download-bandwidth, .poor-ratio { color: #a22; }
 #upload-bandwidth, #download-bandwidth { font-weight: bold; }
-td.seed, td.leech, .paused { filter:alpha(opacity=50); opacity: 0.5; -moz-opacity:0.5; }
+td.seed, td.leech, .paused { opacity: 0.5; }
 td.seed { width: 1em; background-color: #3b3; }
 td.leech { width: 1em; background-color: #a22; }
 tr.complete, tr.complete a { font-weight: bold; color: green; }
