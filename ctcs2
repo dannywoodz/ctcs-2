@@ -2902,22 +2902,13 @@ follows as the favicon for the setup_favicon function.  The comma is
 required, and the byte count should match the length of the base64
 ecoded data that follows it from the next line. This is more persnickety
 than it needs to be.  What can I say?  I was bored when I wrote the code.
---favicon,1095 bytes
-AAABAAEAEBAAAAEAGAAUAwAAFgAAAIlQTkcNChoKAAAADUlIRFIAAAAQAAAAEAgGAAAAH/P/
-YQAAAttJREFUOI1tk01oXFUUx3/3faTTTL5mUiOtghgpNFLQxo2NKIEiXaTSnVpRGtyp3Yku
-BHEVqOh0J0U3abVuCiLEuBC1QkQaAhmpidFS2iFmksxHgpPmvXffvfe9d11ER8t4dufwPz/O
-OZy/4H/i0pffkKQpxhi01mitMcbwzuuTHVrx3+TK7DWw1h4aGqTY14sQgt0oprn9J+u1Opu1
-TeI4FqV33+wEXJn9noHeHnv8sREG+vLcqC+x0rhJKGP6uY+B7BD15jYrK8u0Wi3x8fvv/Qv4
-dOY7Cn099tnjo6xGFS7+epGGbeC6LkmSEIcxXbKbsa5TuK39LC8vsbt7V3z+0Qc4ANZmduzx
-R6kEt+n1e7nw1AWGneG93ZXh8onLfHZ6mq83LlHP1igWixhjLIDzydVZHhgapL+vm1K5hHAE
-AkFYDZGRREpJzs3hOz7xluSH4AscT+B5HidfeBXPGMPBA4OUa2Xqqt4+jjEGGUlSk7ZrWmsC
-E7BmbpHL5TFG42itcV2XXzaXSdMUm1kAbGaRoUTFCvH3rbXSKKlo6HV830cphaeUIogkd6OQ
-WMZkNgPgzNgZuu90M3F4As/xABgfGWeuOYeJNdZalFI4Sik2G9sUnCGiMGpPMPrgKOdPnEds
-C6Znp8myjNIrJcYL4/RkBcIw3JtAa03ljzWOHj2Ca3ys3QNMfjjJ4p1FdrIdnKLD1MwUWZgR
-EPH84XPcrN/CGIMz9dYbVFZXaTZ3mDj4UhtguyzB/QHZgYw4jdnwN6gVajw5fBIdJVSrVX6f
-v4YHIKUU8wsL9tixJ7g68y1zv33F9Y2f0IU9D6RJSs7fz9P9p3iII8z/PI9SStzzyi+fe5t9
-+3J2ePgRMi9hqbXAelBBa03RHeJhf4Q0gnK5zNbWlli9cb3TTKfPvkaapjafz5PP5/E8D2st
-QRBQq9WoVqtordvNHYB/4pnnXkQbfY+VkyTh9uKPHdq/AMbMlj7FCkD0AAAAAElFTkSuQmCC
+--favicon,429 bytes
+AAABAAEAEBAQAAEABAAoAQAAFgAAACgAAAAQAAAAIAAAAAEABAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAMbQgAY1hGACtrJwCDeWcAYYNTADqaOABflF4AmpR/AFe6VgCyq5YAiMCFAKO+
+mwDJxbYA1uDPAPX79QAAAAAA////8f///////xEzEx/////zd0QkMR///zmUAAAEEf/zy95g
+AABD//nF7kIgIiMf/LXe7tvuRD98qN7avuZUP/6o7mVe4lQxnNjeaF7iVD/86O6ojuJXP/nt
+7qiO5Xcf/87oiIirk///nO7bu8k//////NzMl///////n5/////+/wAA8B8AAOAHAADAAwAA
+gAMAAIABAACAAQAAAAEAAIAAAAAAAQAAgAEAAIABAADAAwAAwAcAAPgPAAD9fwAA
 __END__
 
 BSD LICENCE
