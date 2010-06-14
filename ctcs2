@@ -1013,8 +1013,9 @@ sub json_encode_to_stream
     print $stream '{';
     while ( my ($key, $value) = each %$entity)
     {
-      json_encode_to_stream($key, $stream);
-      print $stream ':';
+      # Perl 5 hash keys are only *ever* strings.
+      $key =~ s/"/\\"/g;
+      print $stream '"', $key, '":';
       json_encode_to_stream($value, $stream);
       print $stream ',';
     }
