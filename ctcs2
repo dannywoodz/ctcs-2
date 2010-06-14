@@ -171,7 +171,6 @@ $SIG{PIPE}  = 'IGNORE';
 
 my %clients;
 my %ctcs;
-my $favicon;
 
 ###############################################################################
 # Command-line options
@@ -228,7 +227,7 @@ $ctcs{auto_refresh}         = 1;
 ###############################################################################
 
 setup_api(\%ctcs);
-setup_favicon(\$favicon);
+setup_favicon(\%ctcs);
 
 ctcs_log(LOG_INFO, 'CTCS Server started on port %d', $port);
 
@@ -941,7 +940,7 @@ sub page_content
   my $page = shift;
 
   return json_status() if ($page eq '/current-status');
-  return favicon() if $page eq '/favicon.ico' && defined($favicon);
+  return favicon() if $page eq '/favicon.ico' && exists($ctcs{favicon});
   return html_page(\&index_page) if $page eq '/';
   return html_page(\&torrent_info_page, $1, { noscript => 1}) if $page =~ /^\/?torrent\/(.+)$/;
   return html_page(\&advanced_limits_page, { noscript => 1}) if $page eq '/advanced-limits';
@@ -2854,15 +2853,16 @@ END_CSS
 
 sub favicon
 {
-  return $favicon;
+  return $ctcs{favicon}->();
 }
 
 sub setup_favicon
 {
-  my $ref = shift;
-  my $data = '';
-  my $read = 0;
-  my $length = 0;
+  my $ctcs    = shift;
+  my $favicon = undef;
+  my $data    = '';
+  my $read    = 0;
+  my $length  = 0;
 
   while(defined(my $line = <DATA>))
   {
@@ -2892,7 +2892,9 @@ sub setup_favicon
     return;
   }
 
-  $$ref = decode_base64($data);
+  $favicon = decode_base64($data);
+
+  $ctcs->{favicon} = sub { $favicon };
 
   ctcs_log(LOG_INFO, 'Loaded favicon');
 }
