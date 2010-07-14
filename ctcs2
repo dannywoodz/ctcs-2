@@ -1857,7 +1857,7 @@ sub get_torrent_by_id
 
 sub get_client_by_id
 {
-  my $id = shift;
+  my $id = shift || die 'get_client_by_id missing id';
 
   foreach my $client (keys %clients)
   {
@@ -1866,6 +1866,9 @@ sub get_client_by_id
       return $clients{$client}->{socket};
     }
   }
+
+  ctcs_log(LOG_ERROR, q(Couldn't find torrent with id '%s'), $id);
+
   return undef;
 }
 
