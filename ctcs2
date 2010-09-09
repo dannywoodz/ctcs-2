@@ -1601,8 +1601,9 @@ sub smoothed_dl_rate
 {
   my $torrent = $_[0];
   my $smoothed_dl_rate = 0;
+  my $history_points = $#{$torrent->{download_rate_history}};
   $smoothed_dl_rate += $_ for @{$torrent->{download_rate_history}};
-  $smoothed_dl_rate = $smoothed_dl_rate/$#{$torrent->{download_rate_history}} if $smoothed_dl_rate > 0;
+  $smoothed_dl_rate = $smoothed_dl_rate/$history_points if $history_points > 0;
   return $smoothed_dl_rate;
 }
 
