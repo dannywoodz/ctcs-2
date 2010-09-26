@@ -68,7 +68,7 @@ use IO::Select;
 use IO::Handle;
 use Scalar::Util;
 use Socket 'TCP_NODELAY';
-use Errno 'EAGAIN';
+use Errno 'EAGAIN', 'EINTR';
 use MIME::Base64;
 use CGI qw(:standard);
 use Getopt::Long;
@@ -81,6 +81,7 @@ use constant LOG_DEBUG     => [1, 'DEBUG'];
 use constant LOG_INFO      => [2, 'INFO'];
 use constant LOG_WARNING   => [3, 'WARNING'];
 use constant LOG_ERROR     => [4, 'ERROR'];
+use constant LOG_FATAL     => [5, 'FATAL'];
 use constant LOG_ALWAYS    => [10,'ALWAYS'];
 use constant LOG_MIN       => 1;
 use constant LOG_MAX       => 4;
@@ -235,31 +236,44 @@ ctcs_log(LOG_INFO, 'CTCS Server started on port %d', $port);
 # Main loop
 ###############################################################################
 
-for (my ($last_update, $now) = (time(), time()); defined($server); $now = time())
-{
-  my ($readable, $writable, $errored) = IO::Select::select($readers, $writers, $errors, 1);
-
-  handle_error($_) for @$errored;
-  handle_write($_) for @$writable;
-  handle_read($_)  for @$readable;
-
-  if ($now > $last_update + 4)
+eval {
+  for (my ($last_update, $now) = (time(), time()); defined($server); $now = time())
   {
-    foreach my $client (torrent_clients())
+    my ($readable, $writable, $errored);
+
+    eval {
+      ($readable, $writable, $errored) = IO::Select::select($readers, $writers, $errors, 1);
+    };
+
+    if ( $!{EINTR} )
     {
-      my $torrent = torrent_handled_by($client);
-      unless(torrent_is_paused($torrent))
-      {
-        torrent_update_detail($client);
-        torrent_update_status($client);
-        torrent_update_peers($client);
-        torrent_update_config($client);
-      }
-      ctcs_update_bandwidth_allocation();
+      ctcs_log(LOG_WARNING, "EINTR on select");
+      next;
     }
-    $last_update = $now;
+
+    handle_error($_) for @$errored;
+    handle_write($_) for @$writable;
+    handle_read($_)  for @$readable;
+
+    if ($now > $last_update + 4)
+    {
+      foreach my $client (torrent_clients())
+      {
+	my $torrent = torrent_handled_by($client);
+	unless(torrent_is_paused($torrent))
+	{
+	  torrent_update_detail($client);
+	  torrent_update_status($client);
+	  torrent_update_peers($client);
+	  torrent_update_config($client);
+	}
+	ctcs_update_bandwidth_allocation();
+      }
+      $last_update = $now;
+    }
   }
-}
+};
+ctcs_log(LOG_FATAL, "Uncaught error '%s'", $!) && die if $@;
 
 cleanup();
 exit(0);
@@ -302,6 +316,11 @@ sub handle_read
   if ($socket == $server)       # New client connection
   {
     register_new_client($socket->accept());
+    if ( $!{EINTR} )
+    {
+      ctcs_log(LOG_WARNING, "EINTR on accept");
+      goto &handle_read;
+    }
     $ctcs{accepted_connections}++;
   }
   else                          # Incoming data on a client handle
@@ -552,10 +571,19 @@ sub writer_function
              $message_length - $message_offset, $message_length,
              $message_offset);
 
-    my $written = syswrite($client,
-                           $message,
-                           $message_length - $message_offset,
-                           $message_offset);
+    my $written;
+    eval {
+      $written = syswrite($client,
+                          $message,
+                          $message_length - $message_offset,
+                          $message_offset);
+    };
+
+    if ( $!{EINTR} )
+    {
+      ctcs_log(LOG_WARNING, "EINTR on syswrite");
+    }
+
     if (!defined($written))
     {
       ctcs_log(LOG_WARNING,
@@ -1647,7 +1675,15 @@ sub line_reader_function
 
     if ($external_read_size > 0)
     {
-      my $result = sysread($client, $buffer, $external_read_size, $buffer_length);
+      my $result = 0;
+      eval {
+        $result = sysread($client, $buffer, $external_read_size, $buffer_length);
+      };
+      if ( $!{EINTR} )
+      {
+        ctcs_log(LOG_WARNING, "EINTR on sysread");
+        $! = EAGAIN;
+      }
       return undef if !defined($result) || $result == 0;
       $buffer_length += $result;
     }
@@ -2338,11 +2374,12 @@ sub address_of
   my $client = shift;
   unless (exists $clients{$client}->{address})
   {
-    $clients{$client}->{address} = $client->opened() ?
-    (gethostbyaddr($client->peeraddr(), AF_INET))[0] :
-    'CLOSED';
+    my $addr = $client->opened() ?
+      (gethostbyaddr($client->peeraddr(), AF_INET))[0] :
+      'CLOSED';
+    $clients{$client}->{address} = $addr || $client->peerhost();
   }
-  return $clients{$client}->{address};
+  return $clients{$client}->{address} ||= $client->peerhost();
 }
 
 sub peer_count_for
