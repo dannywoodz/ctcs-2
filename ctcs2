@@ -2857,6 +2857,17 @@ END_CSS
 
 sub favicon
 {
+  #############################################################################
+  # Why bother with this?  Why store the favicon in an anonymous sub, rather
+  # than data directly in %ctcs?
+  # It's purely cosmetic.  If you look at the /debug page, direct image storage
+  # yields a very ugly string that, depending on the content, can screw up my
+  # basic JSON emitter (json_encode).  A CODE ref, on the other hand, just
+  # renders as "CODE(0x85d7514)", or something similar.  I *could* just store
+  # the base64 encoded string and decode it for each request (this would allow
+  # the image string to render on /debug without any problems), but that's
+  # just wasted overhead.  The anonymous sub is cleaner.
+  #############################################################################
   return $ctcs{favicon}->();
 }
 
