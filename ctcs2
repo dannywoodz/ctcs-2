@@ -820,10 +820,13 @@ sub handle_form_submission
     my $id      = CGI::unescape($query->param('torrent-id'));
     my $torrent = get_torrent_by_id($id);
 
-    torrent_pause($torrent)  if $action eq 'Pause';
-    torrent_resume($torrent) if $action eq 'Resume';
-    torrent_quit($torrent)   if $action eq 'Quit';
-    torrent_update($torrent) if $action eq 'Update';
+    if ( $torrent )
+    {
+      torrent_pause($torrent)  if $action eq 'Pause';
+      torrent_resume($torrent) if $action eq 'Resume';
+      torrent_quit($torrent)   if $action eq 'Quit';
+      torrent_update($torrent) if $action eq 'Update';
+    }
 
     return with_output_to_string {
       print 'HTTP/1.1 302 Found', $CRLF;
@@ -835,8 +838,8 @@ sub handle_form_submission
     my $params = $query->Vars;
     my $id = $params->{'torrent-id'};
     my $page = $id ? "/torrent/$id" : '/';
-    my $torrent = get_torrent_by_id(CGI::unescape($id));
-    my $config = $torrent->{config};
+    my $torrent = get_torrent_by_id(CGI::unescape($id), {});
+    my $config  = $torrent->{config} || {};
 
     foreach my $option (keys %$config)
     {
@@ -1836,6 +1839,14 @@ sub autobalance_bandwidth
 sub send_message
 {
   my ($message, $client) = @_;
+
+  if (!$client)
+  {
+    ctcs_log(LOG_WARNING,
+	     'Caught a request to send a message to an undefined client');
+    return;
+  }
+
   send_message_function(writer_function(sub { $message }), $client);
 }
 
@@ -1875,12 +1886,14 @@ sub send_message_function
 
 ###############################################################################
 # For a given id, find the torrent subhash in %clients that contains the
-# information about that torrent.  Return undef if no such torrent is found
+# information about that torrent.  If no torrent is found, return whatever's
+# been specified as the second argument, defaulting to undef
 ###############################################################################
 
 sub get_torrent_by_id
 {
-  my $id = shift;
+  my $id      = shift;
+  my $default = shift;
 
   foreach my $client (keys %clients)
   {
@@ -1889,7 +1902,7 @@ sub get_torrent_by_id
       return $clients{$client}->{torrent};
     }
   }
-  return undef;
+  return $default;
 }
 
 sub get_client_by_id
