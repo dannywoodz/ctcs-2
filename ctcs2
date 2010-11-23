@@ -2386,9 +2386,9 @@ sub apicall(&)
       no strict 'refs';
       no warnings 'misc'; # The following *may* assign undef to a typeglob, which generates a warning.
       use vars qw($params @torrents $socket $explicit_parameters);
-      local(*{$pkg.'::params'})   = \($params   = $parameters);
-      local(*{$pkg.'::torrents'}) = \(@torrents = @torrent_list);
-      local(*{$pkg.'::socket'})   = \($socket   = $client_socket);
+      local(*{$pkg.'::params'})   = \(my $params   = $parameters);
+      local(*{$pkg.'::torrents'}) = \(my @torrents = @torrent_list);
+      local(*{$pkg.'::socket'})   = \(my $socket   = $client_socket);
       local(*{$pkg.'::explicit_parameters'}) = \(my $explicit_parameters = $explicit_params);
       $response_data = $fun->();
     };
