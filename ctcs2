@@ -502,11 +502,11 @@ sub reader_function_for
 
     $function = $clients{$socket}->{reader} = sub {
       my $client = $_[0];
-      my ($line, $result);
+      my $result;
 
       $initialise->() if $do_initialise;
 
-      while (!$header_read && defined($line = $line_reader->($client)))
+      while (!$header_read && defined(my $line = $line_reader->($client)))
       {
         return $line if $line !~ /^(?:POST|GET)/ && tell($header) == 0;
         $content_length = $1 if $line =~ /^Content-Length: (\d+)/;
@@ -1570,7 +1570,7 @@ sub smoothed_dl_rate
 
 sub line_reader_function
 {
-  my ($buffer, $buffer_length) = ('', 0);
+  my ($buffer, $buffer_length, $buffered_lines) = ('', 0, 0);
 
   return sub {
 
@@ -1585,9 +1585,7 @@ sub line_reader_function
 
     my $external_read_size =
     (defined($bytes_requested) && $bytes_requested >= $buffer_length) ?
-    $bytes_requested - $buffer_length :
-    ($buffer               =~ tr/\n/\n/) ? 0 :
-    1024;
+    $bytes_requested - $buffer_length : $buffered_lines ? 0 : 1024;
 
     ###########################################################################
     # Read from the exteral source, if required
@@ -1606,6 +1604,7 @@ sub line_reader_function
       }
       return undef if !defined($result) || $result == 0;
       $buffer_length += $result;
+      $buffered_lines = ($buffer =~ tr/\n/\n/);
     }
 
     ###########################################################################
@@ -1617,17 +1616,17 @@ sub line_reader_function
     ###########################################################################
 
     return undef if defined($bytes_requested) && $bytes_requested < $buffer_length;
-    return undef unless defined($bytes_requested) || $buffer =~ /\n/g;
+    return undef unless defined($bytes_requested) || $buffered_lines;
 
     ###########################################################################
     # Ok, by now, $buffer has enough data in it, so extract the line/required
     # number of bytes and adjust the internal buffer appropriately.
     ###########################################################################
 
-    my $snip_point   = $bytes_requested || pos($buffer);
+    my $snip_point   = $bytes_requested || index($buffer, "\n") + 1;
     my $line         = substr($buffer, 0, $snip_point);
     $buffer          = $snip_point < $buffer_length ? substr($buffer, $snip_point) : '';
-    $buffer_length  -= length($line);
+    $buffer_length  -= $snip_point;
 
     ###########################################################################
     # Unless extracting a specific number of bytes, trim off any blank spaces
@@ -1640,6 +1639,7 @@ sub line_reader_function
       chomp($line);
     }
 
+    $buffered_lines--;
     return $line;
   };
 }
