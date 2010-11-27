@@ -9,7 +9,7 @@ ctcs2
 
 =head1 SYNOPSIS
 
-ctcs2 [--download=1000] [--upload=50] [--port=8080] [--no-log-times] [--help]
+ctcs2 [--download=1000] [--upload=50] [--port=8080] [--no-log-times] [--passive] [--help]
 
 =head1 DESCRIPTION
 
@@ -44,6 +44,12 @@ Suppresses the printing of timestamps on log messages.  This is useful when
 using CTCS2 with an external logging mechanism like daemontools' multilog, where
 timestamps are automatically prepended to log lines.  Defaults to off (log
 messages are timestamped)
+
+=item --passive
+
+Don't issue requests for config, detail or status updates to connected torrents;
+only listen for events.  This is particularly useful for testing with 'dumb'
+clients.
 
 =back
 
@@ -97,6 +103,7 @@ my $download_limit            = 1000;
 my $upload_limit              = 50;
 my $suppress_log_timestamps   = 0;
 my $current_id                = 1;
+my $passive                   = 0;
 my $help                      = undef;
 my $update_connected_torrents = 1;
 
@@ -180,6 +187,7 @@ GetOptions('port=i'       => \$port,
            'download=i'   => \$download_limit,
            'upload=i'     => \$upload_limit,
            'no-log-times' => \$suppress_log_timestamps,
+           'passive'      => \$passive,
            'help'         => \$help);
 
 ###############################################################################
@@ -431,7 +439,11 @@ sub handle_request
       my $function = function_to_handle_request($message, $client);
       send_message_function($function, $client) if $function;
     };
-    ctcs_log(LOG_WARNING, $@) if $@;
+    if ($@)
+    {
+      chomp(my $error = $@);
+      ctcs_log(LOG_WARNING, q('%s caused by '%s'), $error, $message);
+    }
   }
   else
   {
@@ -562,6 +574,8 @@ sub writer_function
     }
 
     my $client  = shift;
+
+    return 1 if $passive && exists($clients{$client}->{torrent});
 
     ctcs_log(LOG_DEBUG, 'Writing %d bytes of length %d, starting at %d',
              $message_length - $message_offset, $message_length,
@@ -2301,7 +2315,7 @@ sub address_of
 sub peer_count_for
 {
   my $info = torrent_handled_by(shift);
-  return scalar @{$info->{peers}}
+  return scalar @{$info->{peers} ||= []}
 }
 
 sub torrent_summary
