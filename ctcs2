@@ -111,7 +111,6 @@ $SIG{INT}   = \&cleanup;
 $SIG{TERM}  = \&cleanup;
 $SIG{PIPE}  = 'IGNORE';
 
-
 ###############################################################################
 # The core data structures used by the server.
 # %clients is a hash of hashes that contains information about clients, whether
@@ -231,11 +230,8 @@ $ctcs{log_level}            = LOG_INFO->[0];
 $ctcs{log_file_handle}      = \*STDOUT;
 $ctcs{auto_refresh}         = 1;
 
-###############################################################################
-# Setup the API.
-###############################################################################
-
 setup_api(\%ctcs);
+setup_request_handlers(\%ctcs);
 setup_favicon(\%ctcs);
 
 ctcs_log(LOG_INFO, 'CTCS Server started on port %d', $port);
@@ -506,11 +502,11 @@ sub reader_function_for
 
     $function = $clients{$socket}->{reader} = sub {
       my $client = $_[0];
-      my ($line, $result);
+      my $result;
 
       $initialise->() if $do_initialise;
 
-      while (!$header_read && defined($line = $line_reader->($client)))
+      while (!$header_read && defined(my $line = $line_reader->($client)))
       {
         return $line if $line !~ /^(?:POST|GET)/ && tell($header) == 0;
         $content_length = $1 if $line =~ /^Content-Length: (\d+)/;
@@ -650,108 +646,15 @@ sub handle_write
 }
 
 ###############################################################################
-# This is the big decision maker: given a message, it needs to return a
-# writer_function that wraps some content generating function.  The content
-# generating function needs to return a string.
+# This is the big decision maker: given a message, it looks up the handler in
+# the dispatch table for the server ($ctcs{handlers}) and executes it.
 ###############################################################################
 
 sub function_to_handle_request
 {
   my ($message, $client) = @_;
-  my ($command, $params);
-
-  ($command, $params) = split(' ', $message, 2);
-
-  if ($command eq 'CTBW')
-  {
-    $params =~ m/(\d+),\s*(\d+)\s+(?:\d+),\s*(?:\d+)/;
-    record_bandwidth($client, $1, $2);
-  }
-  elsif ($command eq 'CTPEER')
-  {
-    torrent_add_peer(torrent_handled_by($client), $params);
-  }
-  elsif ($command eq 'CTCONFIG')
-  {
-    torrent_store_config(torrent_handled_by($client), $params);
-  }
-  elsif ($command eq 'CTFILE')
-  {
-    torrent_populate_file_info(torrent_handled_by($client), $params);
-  }
-  elsif ($command eq 'CTPEERSTART')
-  {
-    $clients{$client}->{torrent}->{incoming_peers} = [];
-  }
-  elsif ($command eq 'CTPEERSDONE')
-  {
-    my $torrent = torrent_handled_by($client);
-    ctcs_log(LOG_INFO, q(Received %d peers for '%s'),
-             peer_count_for($client),
-             $torrent->{name});
-    $torrent->{peers} = $torrent->{incoming_peers};
-    delete $torrent->{incoming_peers};
-    $torrent->{last_peers_update} = time();
-  }
-  elsif ($command eq 'CTSTATUS')
-  {
-    my $torrent_info = torrent_handled_by($client);
-    torrent_set_status($torrent_info, $params);
-    return exists($torrent_info->{size}) ?
-    undef :
-      writer_function(\&ctcs_request_detail_command);
-  }
-  elsif ($command eq 'CTDETAIL')
-  {
-    $params =~ m/(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/;
-    my $torrent_info = torrent_handled_by($client);
-    $torrent_info->{size}       = $1;
-    $torrent_info->{piece_size} = $2;
-    $torrent_info->{time_now}   = $3;
-    $torrent_info->{time_seed}  = $4;
-  }
-  elsif ($command eq 'CTORRENT')
-  {
-    $params =~ m/([^\s]+)(?:\s+(\d+)\s+(\d+)\s+(.*))?/;
-    handle_register_torrent($client, $1, $2, $3, $4);
-    autobalance_bandwidth();
-    return writer_function( sub { ctcs_protocol() . $CRLF });
-  }
-  elsif ($command eq 'GET')
-  {
-    $params =~ m/^([^\s]+)/;
-    my $target = $1;
-    my $close_after_write = $message =~ /Connection: close/i;
-    return writer_function(sub { handle_send_page($target, $client) }, $close_after_write);
-  }
-  elsif ($command eq 'POST')
-  {
-    $params =~ m/([^\s]+)/;
-    my $target = $1;
-    return writer_function(sub { handle_form_submission($target, $client, $message)}, 1);
-  }
-  elsif ($command eq 'DUMP')
-  {
-    return writer_function(\&handle_dump);
-  }
-  elsif ($command eq 'PROTOCOL')
-  {
-    $params =~ m/0*(\d+)/;
-    $ctcs{protocol} = $1;
-  }
-  elsif ($command eq 'CTFILESDONE'   ||
-         $command eq 'CTFILESTART'   ||
-         $command eq 'CTCONFIGSTART' ||
-         $command eq 'CTCONFIGDONE'  ||
-         $command eq 'CTINFO')
-  {
-    # Nothing: just here to avoid triggering the following exception
-  }
-  else
-  {
-    die "No function to handle request '$message'\n";
-  }
-  return undef;
+  my ($command, $params) = split(' ', $message, 2);
+  return $ctcs{handlers}->{$command}->($client, $params, $message);
 }
 
 ###############################################################################
@@ -1667,7 +1570,7 @@ sub smoothed_dl_rate
 
 sub line_reader_function
 {
-  my ($buffer, $buffer_length) = ('', 0);
+  my ($buffer, $buffer_length, $buffered_lines) = ('', 0, 0);
 
   return sub {
 
@@ -1682,9 +1585,7 @@ sub line_reader_function
 
     my $external_read_size =
     (defined($bytes_requested) && $bytes_requested >= $buffer_length) ?
-    $bytes_requested - $buffer_length :
-    ($buffer               =~ tr/\n/\n/) ? 0 :
-    1024;
+    $bytes_requested - $buffer_length : $buffered_lines ? 0 : 1024;
 
     ###########################################################################
     # Read from the exteral source, if required
@@ -1703,6 +1604,7 @@ sub line_reader_function
       }
       return undef if !defined($result) || $result == 0;
       $buffer_length += $result;
+      $buffered_lines = ($buffer =~ tr/\n/\n/);
     }
 
     ###########################################################################
@@ -1714,17 +1616,17 @@ sub line_reader_function
     ###########################################################################
 
     return undef if defined($bytes_requested) && $bytes_requested < $buffer_length;
-    return undef unless defined($bytes_requested) || $buffer =~ /\n/g;
+    return undef unless defined($bytes_requested) || $buffered_lines;
 
     ###########################################################################
     # Ok, by now, $buffer has enough data in it, so extract the line/required
     # number of bytes and adjust the internal buffer appropriately.
     ###########################################################################
 
-    my $snip_point   = $bytes_requested || pos($buffer);
+    my $snip_point   = $bytes_requested || index($buffer, "\n") + 1;
     my $line         = substr($buffer, 0, $snip_point);
     $buffer          = $snip_point < $buffer_length ? substr($buffer, $snip_point) : '';
-    $buffer_length  -= length($line);
+    $buffer_length  -= $snip_point;
 
     ###########################################################################
     # Unless extracting a specific number of bytes, trim off any blank spaces
@@ -1737,6 +1639,7 @@ sub line_reader_function
       chomp($line);
     }
 
+    $buffered_lines--;
     return $line;
   };
 }
@@ -2471,29 +2374,37 @@ sub apicall(&)
 {
   my $fun = shift;
   return sub {
-    my $params = shift;
-    my $socket = shift;
-    my $name   = shift;
-    my @torrents;
-    my $explicit_parameters = 0;
-    if ( exists($params->{torrents}) )
+    my $parameters      = shift;
+    my $client_socket   = shift;
+    my $name            = shift;
+    my $explicit_params = 0;
+    my @torrent_list;
+    if ( exists($parameters->{torrents}) )
     {
-      ctcs_log( LOG_DEBUG, 'API call taking torrent IDs from explicit parameters \'%s\'', $params->{torrents} );
-      foreach my $id (split(/,/, $params->{torrents}))
+      ctcs_log( LOG_DEBUG, 'API call taking torrent IDs from explicit parameters \'%s\'', $parameters->{torrents} );
+      foreach my $id (split(/,/, $parameters->{torrents}))
       {
         my $torrent = get_torrent_by_id($id);
-        push(@torrents, $torrent) if $torrent;
+        push(@torrent_list, $torrent) if $torrent;
       }
-      $explicit_parameters = 1;
+      $explicit_params = 1;
     }
     else
     {
       ctcs_log( LOG_DEBUG, 'API call using all torrent clients' );
-      @torrents = all_torrents();
+      @torrent_list = all_torrents();
     }
     my $response_data = undef;
     eval {
-      $response_data = $fun->($params, \@torrents, $socket, $explicit_parameters);
+      my $pkg = caller();
+      no strict 'refs';
+      no warnings 'misc'; # The following *may* assign undef to a typeglob, which generates a warning.
+      use vars qw($params @torrents $socket $explicit_parameters);
+      local(*{$pkg.'::params'})   = \(my $params   = $parameters);
+      local(*{$pkg.'::torrents'}) = \(my @torrents = @torrent_list);
+      local(*{$pkg.'::socket'})   = \(my $socket   = $client_socket);
+      local(*{$pkg.'::explicit_parameters'}) = \(my $explicit_parameters = $explicit_params);
+      $response_data = $fun->();
     };
     $response_data ||= {};
     chomp $@ if $@;
@@ -2510,58 +2421,60 @@ sub setup_api
   my $api = $server->{api} = {};
 
   ##############################################################################
-  # The block given to apicall is given four parameters in @_:
-  # - the HTTP parameters of the request that triggered the call
-  # - a list reference of torrent instances (elements of the %clients hash)
-  # - a client socket that initiated the request
-  # - a boolean flag indicating whether the torrent list is expicit or assumed
+  # The block given to apicall has four variables pre-prepared:
+  # - $socket - the thing asking for the API call to be executed
+  # - @torrents - torrents over which the API call can be executed.
+  # - $params - the CGI parameters used to invoke the API call
+  # - $explicit_parameters - was the list of torrents selected from the incoming
+  #                          parameters, or is it the default 'all torrents'
+  #                          (true if selected, false if default)
   ##############################################################################
 
   $api->{pause}   = apicall {
-    my @paused    = map { torrent_pause($_); torrent_summary($_); } @{$_[1]};
+    my @paused    = map { torrent_pause($_); torrent_summary($_); } @torrents;
     return { 'torrents' => \@paused };
   };
   $api->{resume}  = apicall {
-    my @resumed   = map { torrent_resume($_); torrent_summary($_) } @{$_[1]};
+    my @resumed   = map { torrent_resume($_); torrent_summary($_) } @torrents;
     return { 'torrents' => \@resumed };
   };
   $api->{update}  = apicall {
-    my @updated   = map { torrent_update($_); torrent_summary($_) } @{$_[1]};
+    my @updated   = map { torrent_update($_); torrent_summary($_) } @torrents;
     return { 'torrents' => \@updated };
   };
   $api->{count}   = apicall {
-    return { 'count' => scalar @{$_[1]} };
+    return { 'count' => scalar @torrents };
   };
   $api->{'torrent-status'} = apicall {
-    my @statuses = status_of_multiple_torrents(@{$_[1]});
+    my @statuses = status_of_multiple_torrents(@torrents);
     return { 'torrent-status' => \@statuses };
   };
 
   $api->{exit}    = apicall {
     # Need to write out the response immediately, as we're about to quit.
-    print { $_[2] } prepare_http_message(json_encode({'action' => 'CTCS exiting', 'status' => 'success'}));
+    print $socket prepare_http_message(json_encode({'action' => 'CTCS exiting', 'status' => 'success'}));
     exit(0);
   };
 
   $api->{quit}        = apicall {
-    die "explicit torrent ids are required for the quit API call\n" unless $_[3];
-    my @quit = map { torrent_quit($_); torrent_summary($_) } @{$_[1]};
+    die "explicit torrent ids are required for the quit API call\n" unless $explicit_parameters;
+    my @quit = map { torrent_quit($_); torrent_summary($_) } @torrents;
     return { 'torrents' => \@quit };
   };
 
   $api->{paused}  = apicall {
-    my @paused    = map { torrent_summary($_) } grep { torrent_is_paused($_) } @{$_[1]};
+    my @paused    = map { torrent_summary($_) } grep { torrent_is_paused($_) } @torrents;
     return { 'torrents' => \@paused, 'count' => scalar @paused };
   };
 
   $api->{active}  = apicall {
-    my @active    = map { torrent_summary($_) } grep { !torrent_is_paused($_) } @{$_[1]};
+    my @active    = map { torrent_summary($_) } grep { !torrent_is_paused($_) } @torrents;
     return { 'torrents' => \@active, 'count' => scalar @active };
   };
 
   $api->{torrents} = apicall {
-    my @torrents   = map { torrent_summary($_) } @{$_[1]};
-    return { 'torrents' => \@torrents, 'count' => scalar @torrents };
+    my @summaries   = map { torrent_summary($_) } @torrents;
+    return { 'torrents' => \@summaries, 'count' => scalar @summaries };
   };
 
   $api->{'get-bandwidth-limits'} = apicall {
@@ -2569,8 +2482,8 @@ sub setup_api
   };
 
   $api->{'set-bandwidth-limits'} = apicall {
-    my $upload_limit   = $_[0]->{'upload-limit'};
-    my $download_limit = $_[0]->{'download-limit'};
+    my $upload_limit   = $params->{'upload-limit'};
+    my $download_limit = $params->{'download-limit'};
     if ( defined($download_limit) && $download_limit =~ /^0*\d+$/ )
     {
       $ctcs{download_limit} = $download_limit;
@@ -2591,8 +2504,8 @@ sub setup_api
   };
 
   $api->{'set-config'} = apicall {
-    die "set-config API call requires a single active torrent id\n" if scalar @{$_[1]} != 1;
-    my $torrent     = $_[1]->[0]; # Only one torrent can have its config at the moment
+    die "set-config API call requires a single active torrent id\n" if scalar @torrents != 1;
+    my $torrent     = $torrents[0]; # Only one torrent can have its config at the moment
     # Config changes are not realised internally at once.  Instead, the the connected torrent
     # is asked to supply its altered config as part of its communications with the server
     # (besides, each config change simply adds to a write request queue for the connected
@@ -2603,9 +2516,9 @@ sub setup_api
     my %config_copy = %{$torrent->{config}};
     foreach my $key (keys %{$torrent->{config}})
     {
-      if ( exists($_[0]->{$key}) && torrent_set_config( $torrent, $key, $_[0]->{$key} ) )
+      if ( exists($params->{$key}) && torrent_set_config( $torrent, $key, $params->{$key} ) )
       {
-        $config_copy{$key}->{value} = $_[0]->{$key};
+        $config_copy{$key}->{value} = $params->{$key};
       }
     }
     return { 'torrent' => $torrent->{name},
@@ -2615,7 +2528,7 @@ sub setup_api
 
   $api->{'get-config'} = apicall {
     my @configs;
-    foreach my $torrent (@{$_[1]})
+    foreach my $torrent (@torrents)
     {
       push(@configs, { 'torrent' => $torrent->{name},
                        'id'      => $torrent->{ctcs_id},
@@ -2624,7 +2537,7 @@ sub setup_api
     return { 'configs' => \@configs };
   };
   $api->{'set-log-level'} = apicall {
-    my $log_level = $_[0]->{'log-level'};
+    my $log_level = $params->{'log-level'};
     return ( $log_level =~ /^\d+$/ && $log_level >= LOG_MIN && $log_level <= LOG_MAX ) ?
     {
      'log-level' => ($ctcs{log_level} = $log_level) } :
@@ -2639,6 +2552,124 @@ sub setup_api
     my @apifuns = keys %{$api};
     return { 'api' => \@apifuns };
   };
+}
+
+###############################################################################
+# All clients--whether ctorrent instances or web browsers--issue requests,
+# usually with parameters, and occasionally with a source message.  Since this
+# happens so often, I go to the effort to construct a lexical environment for
+# handler subs that defines $client, $params and $message.
+###############################################################################
+
+sub client_request_handler(&)
+{
+  my $function = shift;
+  return sub {
+    no strict 'refs';
+    use vars qw($client $params $message);
+    my $pkg = caller();
+    local(*{$pkg.'::client'})  = \($client  = shift);
+    local(*{$pkg.'::params'})  = \($params  = shift);
+    local(*{$pkg.'::message'}) = \($message = shift);
+    return $function->();
+  };
+}
+
+###############################################################################
+# null_request_handlers are just like regular handlers, except that they
+# always return undef to their callers (i.e. they are executed solely for
+# their side-effects)
+###############################################################################
+
+sub null_client_request_handler(&)
+{
+  my $function = shift;
+  my $handler = client_request_handler {
+    $function->();
+    return undef;
+  };
+  return $handler;
+}
+
+###############################################################################
+# The handlers for requests aren't hard-coded, but instead stored in a hash
+# an indexed by the type of request.  When called against a given server,
+# this method sets up the default request handlers.
+# All request handlers have $client, $params and $message pre-defined in their
+# lexical environments
+###############################################################################
+
+sub setup_request_handlers
+{
+  my $server = shift;
+  my $handlers = $server->{handlers} = {};
+
+  $handlers->{CTBW} = null_client_request_handler {
+    $params =~ m/(\d+),\s*(\d+)\s+(?:\d+),\s*(?:\d+)/;
+    record_bandwidth($client, $1, $2);
+  };
+  $handlers->{CTPEER} = null_client_request_handler {
+    torrent_add_peer(torrent_handled_by($client), $params);
+  };
+  $handlers->{CTCONFIG} = null_client_request_handler {
+    torrent_store_config(torrent_handled_by($client), $params);
+  };
+  $handlers->{CTFILE} = null_client_request_handler {
+    torrent_populate_file_info(torrent_handled_by($client), $params);
+  };
+  $handlers->{CTPEERSTART} = null_client_request_handler {
+    $clients{$client}->{torrent}->{incoming_peers} = [];
+  };
+  $handlers->{CTPEERSDONE} = null_client_request_handler {
+    my $torrent = torrent_handled_by($client);
+    ctcs_log(LOG_INFO, q(Received %d peers for '%s'),
+	     peer_count_for($client),
+	     $torrent->{name});
+    $torrent->{peers} = $torrent->{incoming_peers};
+    delete $torrent->{incoming_peers};
+    $torrent->{last_peers_update} = time();
+  };
+  $handlers->{CTSTATUS} = client_request_handler {
+    my $torrent_info = torrent_handled_by($client);
+    torrent_set_status($torrent_info, $params);
+    return exists($torrent_info->{size}) ?
+    undef : writer_function(\&ctcs_request_detail_command);
+  };
+  $handlers->{CTDETAIL} = null_client_request_handler {
+    $params =~ m/(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/;
+    my $torrent_info = torrent_handled_by($client);
+    $torrent_info->{size}       = $1;
+    $torrent_info->{piece_size} = $2;
+    $torrent_info->{time_now}   = $3;
+    $torrent_info->{time_seed}  = $4;
+  };
+  $handlers->{CTORRENT} = client_request_handler {
+    $params =~ m/([^\s]+)(?:\s+(\d+)\s+(\d+)\s+(.*))?/;
+    handle_register_torrent($client, $1, $2, $3, $4);
+    autobalance_bandwidth();
+    return writer_function( sub { ctcs_protocol() . $CRLF });
+  };
+  $handlers->{GET} = client_request_handler {
+    $params =~ m/^([^\s]+)/;
+    my $target = $1;
+    my $close_after_write = $message =~ /Connection: close/i;
+    return writer_function(sub { handle_send_page($target, $client) }, $close_after_write);
+  };
+  $handlers->{POST} = client_request_handler {
+    $params =~ m/([^\s]+)/;
+    my $target = $1;
+    return writer_function(sub { handle_form_submission($target, $client, $message)}, 1);
+  };
+  $handlers->{DUMP} = client_request_handler {
+    return writer_function(\&handle_dump);
+  };
+  $handlers->{PROTOCOL} = null_client_request_handler {
+    $params =~ m/0*(\d+)/;
+    $ctcs{protocol} = $1;
+  };
+  $handlers->{CTFILESDONE} = $handlers->{CTFILESTART} =
+  $handlers->{CTCONFIGSTART} = $handlers->{CTCONFIGDONE} =
+  $handlers->{CTINFO} = null_client_request_handler { };
 }
 
 sub javascript
