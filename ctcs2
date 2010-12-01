@@ -2399,9 +2399,9 @@ sub apicall(&)
       my $pkg = caller();
       no strict 'refs';
       no warnings 'misc'; # The following *may* assign undef to a typeglob, which generates a warning.
-      use vars qw($params @torrents $socket $explicit_parameters);
+      use vars qw($params $torrents $socket $explicit_parameters);
       local(*{$pkg.'::params'})   = \(my $params   = $parameters);
-      local(*{$pkg.'::torrents'}) = \(my @torrents = @torrent_list);
+      local(*{$pkg.'::torrents'}) = \(my $torrents = \@torrent_list);
       local(*{$pkg.'::socket'})   = \(my $socket   = $client_socket);
       local(*{$pkg.'::explicit_parameters'}) = \(my $explicit_parameters = $explicit_params);
       $response_data = $fun->();
@@ -2431,22 +2431,22 @@ sub setup_api
   ##############################################################################
 
   $api->{pause}   = apicall {
-    my @paused    = map { torrent_pause($_); torrent_summary($_); } @torrents;
+    my @paused    = map { torrent_pause($_); torrent_summary($_); } @$torrents;
     return { 'torrents' => \@paused };
   };
   $api->{resume}  = apicall {
-    my @resumed   = map { torrent_resume($_); torrent_summary($_) } @torrents;
+    my @resumed   = map { torrent_resume($_); torrent_summary($_) } @$torrents;
     return { 'torrents' => \@resumed };
   };
   $api->{update}  = apicall {
-    my @updated   = map { torrent_update($_); torrent_summary($_) } @torrents;
+    my @updated   = map { torrent_update($_); torrent_summary($_) } @$torrents;
     return { 'torrents' => \@updated };
   };
   $api->{count}   = apicall {
-    return { 'count' => scalar @torrents };
+    return { 'count' => scalar @$torrents };
   };
   $api->{'torrent-status'} = apicall {
-    my @statuses = status_of_multiple_torrents(@torrents);
+    my @statuses = status_of_multiple_torrents(@$torrents);
     return { 'torrent-status' => \@statuses };
   };
 
@@ -2458,22 +2458,22 @@ sub setup_api
 
   $api->{quit}        = apicall {
     die "explicit torrent ids are required for the quit API call\n" unless $explicit_parameters;
-    my @quit = map { torrent_quit($_); torrent_summary($_) } @torrents;
+    my @quit = map { torrent_quit($_); torrent_summary($_) } @$torrents;
     return { 'torrents' => \@quit };
   };
 
   $api->{paused}  = apicall {
-    my @paused    = map { torrent_summary($_) } grep { torrent_is_paused($_) } @torrents;
+    my @paused    = map { torrent_summary($_) } grep { torrent_is_paused($_) } @$torrents;
     return { 'torrents' => \@paused, 'count' => scalar @paused };
   };
 
   $api->{active}  = apicall {
-    my @active    = map { torrent_summary($_) } grep { !torrent_is_paused($_) } @torrents;
+    my @active    = map { torrent_summary($_) } grep { !torrent_is_paused($_) } @$torrents;
     return { 'torrents' => \@active, 'count' => scalar @active };
   };
 
   $api->{torrents} = apicall {
-    my @summaries   = map { torrent_summary($_) } @torrents;
+    my @summaries   = map { torrent_summary($_) } @$torrents;
     return { 'torrents' => \@summaries, 'count' => scalar @summaries };
   };
 
@@ -2504,8 +2504,8 @@ sub setup_api
   };
 
   $api->{'set-config'} = apicall {
-    die "set-config API call requires a single active torrent id\n" if scalar @torrents != 1;
-    my $torrent     = $torrents[0]; # Only one torrent can have its config at the moment
+    die "set-config API call requires a single active torrent id\n" if scalar @$torrents != 1;
+    my $torrent     = $torrents->[0]; # Only one torrent can have its config at the moment
     # Config changes are not realised internally at once.  Instead, the the connected torrent
     # is asked to supply its altered config as part of its communications with the server
     # (besides, each config change simply adds to a write request queue for the connected
@@ -2528,7 +2528,7 @@ sub setup_api
 
   $api->{'get-config'} = apicall {
     my @configs;
-    foreach my $torrent (@torrents)
+    foreach my $torrent (@$torrents)
     {
       push(@configs, { 'torrent' => $torrent->{name},
                        'id'      => $torrent->{ctcs_id},
