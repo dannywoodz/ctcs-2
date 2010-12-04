@@ -385,23 +385,6 @@ sub deregister_client
     ctcs_log(LOG_WARNING, $string);
   }
 
-  #############################################################################
-  # There's a small memory problem with the validator functions attached to
-  # config elements.  Specifically, each validator is attached to an element,
-  # but is also a closure that refers to that element.  This creates a cycle
-  # in the memory graph that Perl's reference counting garbage collector
-  # can't deal with.  The solution is to explicitly break the cycle.  This
-  # is acheived by de-scoping the validator function prior to the configuration
-  # element being deleted.
-  #############################################################################
-
-  if (exists($clients{$client}->{torrent}) &&
-      exists($clients{$client}->{torrent}->{config}))
-  {
-    my $config = $clients{$client}->{torrent}->{config};
-    ($config->{$_}->{validator} = undef) for keys %$config;
-  }
-
   delete $clients{$client};
   ctcs_log(LOG_INFO,
            'connection closed%s',
@@ -2137,6 +2120,7 @@ sub attach_config_validator
   ($element->{type} eq 'F') ? \&float_config_validator :
   ($element->{type} eq 'B') ? \&boolean_config_validator :
   \&null_warning_validator;
+  Scalar::Util::weaken($element);
 
   return sub {
     return $validator->($element, shift, $element_name, $torrent_name);
