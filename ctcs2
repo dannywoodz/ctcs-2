@@ -919,7 +919,8 @@ sub unknown_api_call
 {
   my ($path, $client) = @_;
   ctcs_log(LOG_WARNING, q(Unknown API call: '%s'), $path);
-  return json_encode({ 'error' => "Unknown API call '$path'"});
+  return json_encode({'status' => 'error',
+		      'message' => "Unknown API call '$path'"});
 }
 
 ###############################################################################
