@@ -1437,23 +1437,24 @@ sub handle_dump
 {
   my $json;
   return with_output_to_string {
+    my $summary = sub {
+      my $socket = shift;
+      printf "%s: %s:%d (%s)\n",
+      $socket,
+      $socket == $server ? 'SERVER' : address_of($socket),
+      $socket == $server ? $ctcs{port} : $socket->peerport(),
+      $socket == $server ?
+      'SERVER' : exists($clients{$socket}->{torrent}) ?
+      'TORRENT: ' . $clients{$socket}->{torrent}->{name} :
+      'WEB'
+    };
     print "CTCS\n\n";
     $json = json_encode(\%ctcs);
     pretty_print_json_string_ref(\$json);
     print "\nREADERS\n\n";
-    map { printf "%s: %s:%d (%s)\n",
-          $_,
-          $_ == $server ? 'SERVER' : address_of($_),
-          $_ == $server ? $ctcs{port} : $_->peerport(),
-          $_ == $server ? 'SERVER' : exists($clients{$_}->{torrent}) ? 'TORRENT: ' . $clients{$_}->{torrent}->{name} : 'WEB'
-        } $readers->handles;
+    $summary->($_) for $readers->handles();
     print "\nWRITERS\n\n";
-    map { printf "%s: %s:%d (%s)\n",
-          $_,
-          $_ == $server ? 'SERVER' : address_of($_),
-          $_ == $server ? $ctcs{port} : $_->peerport(),
-          $_ == $server ? 'SERVER' : exists($clients{$_}->{torrent}) ? 'TORRENT: ' . $clients{$_}->{torrent}->{name} : 'WEB'
-        } $writers->handles;
+    $summary->($_) for $writers->handles();
     print "\nCLIENTS\n\n";
     $json = json_encode(\%clients);
     pretty_print_json_string_ref(\$json);
