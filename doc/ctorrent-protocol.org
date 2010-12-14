@@ -1,0 +1,373 @@
+* CTORRENT PROTOCOL, v3
+
+The ctorrent bittorrent client sends status messages to the host specified by the -S option.  Additionally, it can be reconfigured and prompted to supply additional details via commands sent to it using the same connection.
+
+This document details this protocol.
+
+* OVERVIEW
+
+The ctorrent protocol is text based.  In version 3, all commands consist of a single line of text, terminated by a carriage-return/line-feed character pair.  The first word of a given message defines the message type, and is always upper-cased.  Subsequent fields are generally in a message-specific format.
+
+* PROTOCOL
+** SAMPLE
+   PROTOCOL 0003
+** DIRECTION
+   ctorrent->listener
+** DRIVER
+   automatic
+** PURPOSE
+   Tells the listener which protocol version to use.  This happens before any other communication.
+** DESCRIPTION
+   The current version of the ctorrent protocol at the time of this writing is version 3.
+
+* CTORRENT-ISSUED COMMANDS
+  A connected ctorrent instance issues commands in the following list.  Some are frequent, automatically sent notifications (e.g. CTBW).  Others are sent in response to an explicit client request (e.g. CTDETAIL in response to a SENDDETAIL command).
+** CTORRENT
+*** SAMPLE
+    CTORRENT -CD0302-0x825187BF8A354FCA0F8C2249 1290863208 1290863208 ubuntu-10.10-desktop-i386.iso.torrent
+*** DIRECTION
+    ctorrent->listener
+*** DRIVER
+    automatic
+*** PURPOSE
+    Registers a torrent with the listener
+*** DESCRIPTION
+    The four space-separated fields are:
+    - the torrent ID
+    - the time that the torrent was started, represented in the canonical Unix format of seconds since the epoch.
+    - the time that the CTORRENT message was sent, again represented as a standard Unix timestamp
+    - the name of the torrent file.  May contain additional spaces, so message-parsing code should account for this.
+** CTSTATUS
+*** SAMPLE
+    CTSTATUS 0:0/0:0/0 0/1387/0 0,0 0,0 0,0 0
+*** DIRECTION
+    ctorrent->listener
+*** DRIVER
+    a previously issued SENDSTATUS command
+*** PURPOSE
+    Supplies basic status information about the torrent, such as available chunks, bandwidth usage, etc.
+*** DESCRIPTION
+    Each number represents, in order:
+    - active seeds
+    - total seeds
+    - active leechers
+    - total leechers
+    - total connections
+    - chunks downloaded
+    - chunks in torrent
+    - chunks available
+    - download rate (bytes/second)
+    - upload rate (bytes/second)
+    - total downloaded (bytes)
+    - total uploaded (bytes)
+    - download bandwidth limit (bytes/second)
+    - upload bandwidth limit (bytes/second)
+    - in-memory cache used (bytes)
+
+** CTBW
+*** SAMPLE
+    CTBW 0,0 0,51200
+*** DIRECTION
+    ctorrent->listener
+*** DRIVER
+    automatic (1/second)
+*** PURPOSE
+    Provides current upload/download bandwidth figures
+*** DESCRIPTION
+    Each number represents, in order:
+    - download rate (bytes/second)
+    - upload rate (bytes/second)
+    - download limit (bytes/second, zero=unlimited)
+    - upload limit (bytes/second, zero=unlimited)
+
+** CTPEERSTART
+*** SAMPLE
+    CTPEERSTART
+*** DIRECTION
+    ctorrent->listener 
+*** DRIVER
+    A previously issued SENDPEERS command
+*** PURPOSE
+    Informs the listener that CTPEER commands are to follow
+*** DESCRIPTION
+    Notification of following CTPEER
+
+** CTPEER
+*** SAMPLE
+    CTPEER -KT4030-w4N3M3q1hLZx XXX.XXX.XXX.XXX CiCn 0 0 0 0 1387
+*** DIRECTION
+    ctorrent->listener
+*** DRIVER
+    automatic once CTPEERSTART has been received
+*** PURPOSE
+    Describes a single peer connected to the ctorrent instance.  Delivered sequentially until a CTPEERSDONE is received.
+*** DESCRIPTION
+    space-separated list of fields, in turn being:
+    - the peer id.  The section between the hyphens is the client software ID
+    - the IP address of the peer
+    - choked/interested flags, down/up
+    - download rate from peer (bytes/s)
+    - upload rate to peer (bytes/s)
+    - downloaded from peer (bytes)
+    - uploaded to peer (bytes)
+    - pieces available from peer
+
+** CTPEERSDONE
+*** SAMPLE
+    CTPEERSDONE
+*** DIRECTION
+    ctorrent->listener 
+*** DRIVER
+    A previously issued SENDPEERS command, followed by zero or more CTPEER lines
+*** PURPOSE
+    Informs the listener that CTPEER commands are finished
+*** DESCRIPTION
+    Notification of completed CTPEER list
+
+** CTCONFIGSTART
+*** SAMPLE
+    CTCONFIGSTART
+*** DIRECTION
+    ctorrent->listener
+*** DRIVER
+    A previously issued SENDCONF command
+*** PURPOSE
+    Notification of incoming CTCONFIG sequence
+*** DESCRIPTION
+    Notification only
+
+** CTCONFIG
+*** SAMPLE
+    CTCONFIG verbose B 0 1:0 19:Verbose output [-v] 8:Disabled
+*** DIRECTION
+    ctorrent->listener
+*** DRIVER
+    A previously received CTCONFIGSTART command
+*** PURPOSE
+    Describes a single config field for a ctorrent client
+*** DESCRIPTION
+    list is separated ad-hoc by spaces and colons.
+    - field 1 ('verbose' in the SAMPLE) is the config option
+    - field 2 ('B' in the SAMPLE) is the type of the value
+      valid values are 'B' (boolean), 'F' (float), 'S' (string) and 'I' (integer)
+    - field 3 ('0' in the SAMPLE)
+      element range.
+      valid for 'I' and 'S' type config options, representing a numeric range (e.g. '1-1000') or a maximum string length, respectively.
+      Limits the range of valid values.
+      0 for non-integer fields. 
+      Expressed in the form '[lower]-[upper]' (e.g. 1-100) for integer options
+    - field 4 ('1:0' in SAMPLE)
+      the element value, preceded by its length
+    - field 6 ('19:Verbose output [-v]' in SAMPLE)
+      the short description of the field, preceded by its length
+    - field 7 ('8:Disabled' in SAMPLE)
+      the long description of the field, preceded by its length
+      yes, I know that it shorter than the short description here.
+*** FIELD SPECIFICATION
+    |--------------+------+---------+----------------------+----------------------------+-----------------------------|
+    | FIELD NAME   | TYPE |   RANGE | EXAMPLE LENGTH:VALUE | SHORT DESC                 |                   LONG DESC |
+    |--------------+------+---------+----------------------+----------------------------+-----------------------------|
+    | verbose      | B    |       0 |                  1:0 | 19:Verbose output [-v]     |                  8:Disabled |
+    | seed_time    | F    |       0 |                 2:72 | 14:Seed time [-e]          | 24:~hours remaining (-e 72) |
+    | seed_ratio   | F    |       0 |               4:2.00 | 15:Seed ratio [-E]         |          15:Upload:Download |
+    | max_peers    | I    | 20-1000 |                3:100 | 14:Max peers [-M]          |        17:Current peers: 49 |
+    | min_peers    | I    | 20-1000 |                  1:1 | Min peers [-m]             |        17:Current peers: 49 |
+    | file_list    | S    |    1024 |                   0: | 19:Download files [-n]     |                          0: |
+    | cache        | I    |       0 |                 2:16 | 15:Cache size [-C]         |      19:MB; 80KB now in use |
+    | pause        | B    |       0 |                  1:0 | 13:Pause torrent           |     20:Stop upload/download |
+    | user_exit    | S    |    1024 |                   0: | 23:Completion command [-X] |                          0: |
+    | out_normal   | S    |    1024 |             6:stdout | 20:Normal/status output    |                          0: |
+    | out_interact | S    |    1024 |             6:stdout | 18:Interactive output      |                          0: |
+    | out_error    | S    |    1024 |             6:stderr | 20:Error/warning output    |                          0: |
+    | out_debug    | S    |    1024 |             6:stderr | 20:Debug/verbose output    |                          0: |
+    | input        | S    |    1024 |              5:stdin | 13:Console input           |                          0: |
+    | ctcs_server  | S    |    1024 |    14:localhost:8080 | 11:CTCS server             |                          0: |
+    |--------------+------+---------+----------------------+----------------------------+-----------------------------|
+
+** CTCONFIGDONE
+*** SAMPLE
+    CTCONFIGDONE
+*** DIRECTION
+    ctorrent->listener
+*** DRIVER
+    A previously received CTCONFIGSTART, followed by zero or more CTCONFIG lines
+*** PURPOSE
+    Notification that all config options have been received
+*** DESCRIPTION
+    Notification purposes only
+
+** CTDETAIL
+*** SAMPLE
+    CTDETAIL 726827008 524288 1290863223 0
+*** DIRECTION
+    ctorrent->listener
+*** DRIVER
+    SENDDETAIL from listener to ctorrent
+*** PURPOSE
+    Provide basic torrent information
+*** DESCRIPTION
+    There are four, space separated numeric fields associated with CTDETAIL
+    - the total size of the torrent, in bytes
+    - the size of an individual piece, in bytes
+    - the time that the CTDETAIL command was sent, as a Unix timestamp
+    - the time that the the connected ctorrent started seeding this file.  0 if currently leeching.
+
+** CTFILESTART
+*** SAMPLE
+    CTFILESTART
+*** DIRECTION
+    ctorrent->listener
+*** DRIVER
+    A previously issued SENDDETAIL command.
+    CTFILESTART is sent after the CTDETAIL that is sent in response to SENDDETAIL
+*** PURPOSE
+    Notice that CTFILE notifications are about to be sent.
+*** DESCRIPTION
+    Notification only.
+** CTFILE
+*** SAMPLE
+    CTFILE 1 0 0 1387 0 1387 726827008 ubuntu-10.10-desktop-i386.iso
+*** DIRECTION
+    ctorrent->listener
+*** DRIVER
+    A previously received CTFILESTART command
+*** PURPOSE
+    Provide details about an individual file within a torrent.  One CTFILE is supplied for each file.
+*** DESCRIPTION
+    8 space separated fields
+    1) the number of the file within the torrent, starting at 1
+    2) the requested priority of the file
+    3) the actual priority of the file
+    4) the number of pieces in the file
+    5) the number of pieces of the file that have actually been downloaded
+    6) the number of pieces of the file that are currently available
+    7) the size of the file, in bytes
+    8) the name of the file
+
+** CTFILESDONE
+*** SAMPLE
+    CTFILESDONE
+*** DIRECTION
+    ctorrent->listener
+*** DRIVER
+    A SENDDETAIL request to the ctorrent instance.
+    CTFILESDONE is always sent after a CTFILE line is received for each file in the torrent.
+*** PURPOSE
+    Notification that no further CTFILE requests are inbound
+*** DESCRIPTION
+    Notification only.
+
+* CLIENT-ISSUED COMMANDS
+  A connected client can, at any time, send the following commands to ctorrent
+** SENDDETAIL
+*** SAMPLE
+    SENDDETAIL
+*** DIRECTION
+    listener->ctorrent
+*** DRIVER
+    client demand
+*** PURPOSE
+    Request that ctorrent prepare and send (asynchronously) a CTDETAIL command, followed by a CTFILESTART/CTFILE/CTFILESDONE chain.
+*** DESCRIPTION
+    Request for data.
+
+** SENDSTATUS
+*** SAMPLE
+    SENDSTATUS
+*** DIRECTION
+    listener->ctorrent
+*** DRIVER
+    client demand
+*** PURPOSE
+    Request that ctorrent prepare and send (asynchronously) a CTSTATUS command
+*** DESCRIPTION
+    Request for data.
+** SENDCONF
+*** SAMPLE
+    SENDCONF
+*** DIRECTION
+    listener->ctorrent
+*** DRIVER
+    client demand
+*** PURPOSE
+    Request that ctorrent prepare and send (asynchronously) a CTCONFIGSTART/CTCONFIG/CTCONFIGDONE chain.
+*** DESCRIPTION
+    Request for data.
+
+    
+
+** SENDPEERS
+*** SAMPLE
+    SENDPEERS
+*** DIRECTION
+    listener->ctorrent
+*** DRIVER
+    client demand
+*** PURPOSE
+    Request that ctorrent prepare and send (asynchronously) a CTPEERSTART/CTPEER/CTPEERSDONE chain
+*** DESCRIPTION
+    Request for data.
+
+    
+
+** SETULIMIT and SETDLIMIT
+*** SAMPLE
+    SETULIMIT 102400
+    SETDLIMIT 102400
+*** DIRECTION
+    listener->ctorrent
+*** DRIVER
+    client demand
+*** PURPOSE
+    Set the upload or download bandwidth usage limit of a torrent.
+    These commands are distinct, and do not need to be issued in pairs.
+*** DESCRIPTION
+    The single parameter is the new limit, int bytes/second.
+
+    
+** CTCONFIG
+*** SAMPLE
+    CTCONFIG pause 1
+*** DIRECTION
+    listener->ctorrent
+*** DRIVER
+    client demand
+*** PURPOSE
+    Sets a single config option to a new value.  A complete list can be found in the [[FIELD SPECIFICATION]] for the CTCONFIG command issued by ctorrent
+*** DESCRIPTION
+    The first field is the name of the config option to set.  The second is the value that it should be set to.
+
+    
+** CTUPDATE
+*** SAMPLE
+    CTUPDATE
+*** DIRECTION
+    listener->ctorrent
+*** DRIVER
+    client demand
+*** PURPOSE
+    Requests that ctorrent refresh its list of peers against the tracker.
+*** DESCRIPTION
+    One-way command.  Only side effect is the possible change in the number of connected peers.
+
+    
+
+
+** CTQUIT
+*** SAMPLE
+    CTQUIT
+*** DIRECTION
+    listener->ctorrent
+*** DRIVER
+    client demand
+*** PURPOSE
+    terminates the connected torrent
+*** DESCRIPTION
+    used by the listener to stop the connected ctorrent instance.
+
+    
+
+
+
+   
+    
