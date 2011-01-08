@@ -982,8 +982,8 @@ sub json_status
 {
   my ($dl, $ul) = total_used_bandwidth();
   my @statuses  = status_of_multiple_torrents(all_torrents());
-  my $data      = { 'download' => human_readable($dl) . '/s',
-                    'upload'   => human_readable($ul) . '/s',
+  my $data      = { 'download' => human_readable_bandwidth($dl) . '/s',
+                    'upload'   => human_readable_bandwidth($ul) . '/s',
                     'torrents' => \@statuses };
   return json_encode($data);
 }
@@ -1198,8 +1198,8 @@ sub index_page
              span({style=>'font-size: 250%; font-style: italic; position: relative; z-index: -1; top: 0.2em; right: 0.75em; color: #bfb;'},
                   '2'));
     my ($download_bandwidth, $upload_bandwidth) = total_used_bandwidth();
-    my $current_download_field = human_readable($download_bandwidth);
-    my $current_upload_field = human_readable($upload_bandwidth);
+    my $current_download_field = human_readable_bandwidth($download_bandwidth);
+    my $current_upload_field = human_readable_bandwidth($upload_bandwidth);
     my $download_field = textfield({name      => 'dlimit',
                                     value     => ($ctcs{download_limit} / 1024),
                                     maxlength => 6,
@@ -1257,8 +1257,8 @@ sub index_page
       my $torrent          = $torrent_info[$count];
       my $torrent_id       = CGI::escape($torrent->{ctcs_id});
       my $torrent_link     = a({href=> '/torrent/' . CGI::escape($torrent->{ctcs_id})}, $torrent->{name});
-      my $upload_rate      = human_readable($torrent->{upload_rate});
-      my $download_rate    = human_readable($torrent->{download_rate});
+      my $upload_rate      = human_readable_bandwidth($torrent->{upload_rate});
+      my $download_rate    = human_readable_bandwidth($torrent->{download_rate});
       my $total_seeders    = $torrent->{total_seeders};
       my $active_seeders   = $torrent->{active_seeders};
       my $total_leechers   = $torrent->{total_leechers};
@@ -2375,6 +2375,19 @@ sub human_readable
 }
 
 ###############################################################################
+# Given a bandwidth figure, report it in a sensible way.  'Sensible' for this
+# app means that integers are displayed for figures in a given range (KB,
+# MB, etc.) that equal or exceed 10.  Below 10, it's formatted to two decimal
+# places (e.g. 1.25KB, 1.1MB).  This really just prevents scattering the format
+# information through the various places in the code where it's used.
+###############################################################################
+
+sub human_readable_bandwidth
+{
+  return human_readable(shift, 'd', '.2f');
+}
+
+###############################################################################
 # A bit of profiling on FreeBSD showed that gethostbyaddr is quite expensive,
 # and invoking it every time a message is received (for the debug log)
 # actually ramped up CPU time to almost twice what it was versus this caching
@@ -2413,8 +2426,8 @@ sub torrent_summary
                                                          $torrent->{total_chunks},
                                                          $torrent->{piece_size},
                                                          smoothed_dl_rate($torrent));
-    $data->{download_rate}    = human_readable($torrent->{download_rate}) . '/s';
-    $data->{upload_rate}      = human_readable($torrent->{upload_rate}) . '/s';
+    $data->{download_rate}    = human_readable_bandwidth($torrent->{download_rate}) . '/s';
+    $data->{upload_rate}      = human_readable_bandwidth($torrent->{upload_rate}) . '/s';
     $data->{seeders}          = $torrent->{active_seeders} . '/' . $torrent->{total_seeders};
     $data->{leechers}         = $torrent->{active_leechers} . '/' . $torrent->{total_leechers};
     $data->{downloaded}       = human_readable($torrent->{downloaded}, '0.2f');
