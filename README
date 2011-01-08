@@ -6,7 +6,9 @@ PREREQUISITES
 
 ctcs2 is written in Perl: you'll need a Perl interpreter on your system to run
 it.  It has been developed against Perl 5.8 on FreeBSD, Linux and Mac OS X and
-makes use of only standard modules
+makes use of only standard modules.  That last part is important: there are
+multiple files in the checkout, but if all you want is a ctorrent status
+listener and web UI, you can get by with *only* the ctcs2 file.
 
 The API module uses JSON::XS, but the API is not required to run CTCS2.
 
@@ -41,5 +43,10 @@ over the API.pm file for documentation.
 To use it, ensure that the folder containing the CTCS2 folder is in your PERL5LIB path,
 and simply 'use CTCS2::API;' from within your Perl script.  You will need the JSON::XS
 module installed.
+
+PROTOCOL
+--------
+
+The ctorrent protocol is fairly simple, and is included in doc/ctorrent-protocol.org
 
                                                            Danny
