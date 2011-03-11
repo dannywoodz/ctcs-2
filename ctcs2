@@ -2456,8 +2456,12 @@ sub setup_api
   };
 
   $api->{quit}        = apicall {
-    die "explicit torrent ids are required for the quit API call\n" unless $explicit_parameters;
-    my @quit = map { torrent_quit($_); torrent_summary($_) } @$torrents;
+    die "explicit torrent ids are required for the quit API call\n" unless $_[3];
+    # Given explicit parameters, apicall ensures that only existing torrents
+    # are given in @{$_[1]}, so if it's empty, the call has either been badly
+    # formed, or using an id that isn't registered with this server.
+    die "no matching torrents for quit API call\n" unless @{$_[1]};
+    my @quit = map { torrent_quit($_); torrent_summary($_) } @{$_[1]};
     return { 'torrents' => \@quit };
   };
 
