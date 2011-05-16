@@ -2448,7 +2448,18 @@ sub setup_api
     my @statuses = status_of_multiple_torrents(@$torrents);
     return { 'torrent-status' => \@statuses };
   };
-
+  $api->{'id-for-name'} = apicall {
+    die "Missing 'name' parameter" unless $params->{name};
+    my $encoded_name = $params->{name};
+    my $name = CGI::unescape($encoded_name);
+    my ($key) = grep {
+      exists $clients{$_}->{torrent} &&
+      $clients{$_}->{torrent}->{name} eq $name
+    } keys %clients;
+    my $id = $clients{$key}->{torrent}->{ctcs_id} if $key;
+    die sprintf(qq(No id for '%s'\n), $name) unless $id;
+    return { id => $id};
+  };
   $api->{exit}    = apicall {
     # Need to write out the response immediately, as we're about to quit.
     print $socket prepare_http_message(json_encode({'action' => 'CTCS exiting', 'status' => 'success'}));

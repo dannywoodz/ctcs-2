@@ -309,6 +309,11 @@ sub set_log_level
   return shift->make_api_call('set-log-level', undef, 'log-level' => shift);
 }
 
+sub id_for_name
+{
+  return shift->make_api_call('id-for-name', undef, 'name' => shift);
+}
+
 sub make_api_call
 {
   my ($self, $call, $torrent_ids, %params) = @_;
@@ -328,7 +333,11 @@ sub make_api_call
   }
 
   my $response = $agent->request($request);
-  return decode_json($response->content()) if $response->is_success();
+  if ( $response->is_success() )
+  {
+    my $content = $response->content();
+    return decode_json($content) if $response->is_success();
+  }
   die "API call failed: " . $response->code();
 }
 
